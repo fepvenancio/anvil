@@ -21,7 +21,7 @@ Requirements for initial release. Each maps to roadmap phases.
 - [ ] **PLAN-02**: Each task in the plan declares `writes[]`, `reads[]`, and `depends_on[]`
 - [ ] **PLAN-03**: Planner rejects plans with overlapping writes between tasks (merges into single task or re-plans)
 - [ ] **PLAN-04**: Plan is validated against a JSON schema before execution begins
-- [ ] **PLAN-05**: User is prompted "Review plan before execution? (Y/n)" with option to view/edit the plan
+- [ ] **PLAN-05**: Single interactive prompt after plan generation: "Review plan before starting execution? (Y/n/edit)" — 'edit' opens plan JSON in $EDITOR, re-validates on save
 - [ ] **PLAN-06**: Plan is saved to `.anvil/roadmap.json` for inspection
 
 ### Execution
@@ -34,13 +34,15 @@ Requirements for initial release. Each maps to roadmap phases.
 - [ ] **EXEC-06**: After each wave completes, all worktrees are merged to main branch
 - [ ] **EXEC-07**: Worktrees are cleaned up after merge (no stale worktrees left behind)
 - [ ] **EXEC-08**: Workers that fail halt their task; the wave continues but the failed task is reported
+- [ ] **EXEC-09**: If High Court aborts or escalates, rollback last wave merge (git reset --hard + worktree cleanup) — bad architecture never leaks into main
 
 ### Review
 
-- [ ] **REVW-01**: Sub-Judges run in parallel after every wave with mechanical checks: TypeScript compilation (tsc), test runner, touch map compliance
-- [ ] **REVW-02**: Sub-Judge failures halt wave progression (next wave does not start)
+- [ ] **REVW-01**: Sub-Judges run in parallel after every wave with mechanical checks
+- [ ] **REVW-01a**: Minimal v1 Sub-Judge set: tsc check, touch-map violation detector, vitest run (if tests exist)
+- [ ] **REVW-02**: Sub-Judge failure does not halt current wave (other tasks finish), but halts progression to next wave — all failures reported together
 - [ ] **REVW-03**: High Court performs a single end-of-build AI architectural review
-- [ ] **REVW-04**: High Court produces one of three decisions: merge (approve), human_required (escalate), or abort
+- [ ] **REVW-04**: High Court produces one of three decisions: merge (approve), human_required (print flags + save `.anvil/high-court-report.json`), or abort (rollback)
 - [ ] **REVW-05**: High Court checks: architectural invariants, no circular dependencies, cross-task coherence
 
 ### Cost
@@ -114,47 +116,49 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CLI-01 | — | Pending |
-| CLI-02 | — | Pending |
-| CLI-03 | — | Pending |
-| CLI-04 | — | Pending |
-| CLI-05 | — | Pending |
-| PLAN-01 | — | Pending |
-| PLAN-02 | — | Pending |
-| PLAN-03 | — | Pending |
-| PLAN-04 | — | Pending |
-| PLAN-05 | — | Pending |
-| PLAN-06 | — | Pending |
-| EXEC-01 | — | Pending |
-| EXEC-02 | — | Pending |
-| EXEC-03 | — | Pending |
-| EXEC-04 | — | Pending |
-| EXEC-05 | — | Pending |
-| EXEC-06 | — | Pending |
-| EXEC-07 | — | Pending |
-| EXEC-08 | — | Pending |
-| REVW-01 | — | Pending |
-| REVW-02 | — | Pending |
-| REVW-03 | — | Pending |
-| REVW-04 | — | Pending |
-| REVW-05 | — | Pending |
-| COST-01 | — | Pending |
-| COST-02 | — | Pending |
-| COST-03 | — | Pending |
-| COST-04 | — | Pending |
-| LIBR-01 | — | Pending |
-| LIBR-02 | — | Pending |
-| LIBR-03 | — | Pending |
-| CLUX-01 | — | Pending |
-| CLUX-02 | — | Pending |
-| CLUX-03 | — | Pending |
-| CLUX-04 | — | Pending |
+| CLI-01 | Phase 2 | Pending |
+| CLI-02 | Phase 5 | Pending |
+| CLI-03 | Phase 5 | Pending |
+| CLI-04 | Phase 5 | Pending |
+| CLI-05 | Phase 1 | Pending |
+| PLAN-01 | Phase 2 | Pending |
+| PLAN-02 | Phase 2 | Pending |
+| PLAN-03 | Phase 2 | Pending |
+| PLAN-04 | Phase 1 | Pending |
+| PLAN-05 | Phase 2 | Pending |
+| PLAN-06 | Phase 1 | Pending |
+| EXEC-01 | Phase 2 | Pending |
+| EXEC-02 | Phase 2 | Pending |
+| EXEC-03 | Phase 2 | Pending |
+| EXEC-04 | Phase 3 | Pending |
+| EXEC-05 | Phase 3 | Pending |
+| EXEC-06 | Phase 3 | Pending |
+| EXEC-07 | Phase 3 | Pending |
+| EXEC-08 | Phase 3 | Pending |
+| EXEC-09 | Phase 4 | Pending |
+| REVW-01 | Phase 3 | Pending |
+| REVW-01a | Phase 3 | Pending |
+| REVW-02 | Phase 3 | Pending |
+| REVW-03 | Phase 4 | Pending |
+| REVW-04 | Phase 4 | Pending |
+| REVW-05 | Phase 4 | Pending |
+| COST-01 | Phase 4 | Pending |
+| COST-02 | Phase 4 | Pending |
+| COST-03 | Phase 4 | Pending |
+| COST-04 | Phase 4 | Pending |
+| LIBR-01 | Phase 4 | Pending |
+| LIBR-02 | Phase 4 | Pending |
+| LIBR-03 | Phase 4 | Pending |
+| CLUX-01 | Phase 5 | Pending |
+| CLUX-02 | Phase 5 | Pending |
+| CLUX-03 | Phase 5 | Pending |
+| CLUX-04 | Phase 1 | Pending |
 
 **Coverage:**
-- v1 requirements: 35 total
-- Mapped to phases: 0
-- Unmapped: 35 ⚠️
+- v1 requirements: 37 total
+- Mapped to phases: 37
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-20*
-*Last updated: 2026-03-20 after initial definition*
+*Last updated: 2026-03-20 after roadmap creation*
