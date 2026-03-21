@@ -14,7 +14,7 @@ export async function runTscCheck(projectDir: string): Promise<SubJudgeCheck> {
     return { name: 'tsc', passed: true, message: 'skipped: no tsconfig.json' };
   }
 
-  // Check if there are any TypeScript source files to compile
+  // Check if there are any TypeScript SOURCE files to compile (not config files)
   // tsc errors with TS18003 ("no inputs found") if include paths match no files,
   // which legitimately happens when scaffold-only waves run before source code waves
   try {
@@ -25,9 +25,12 @@ export async function runTscCheck(projectDir: string): Promise<SubJudgeCheck> {
       '(', '-name', '*.ts', '-o', '-name', '*.tsx', ')',
       '-not', '-path', '*/node_modules/*',
       '-not', '-path', '*/.anvil/*',
+      '-not', '-name', '*.config.ts',
+      '-not', '-name', '*.config.mts',
+      '-not', '-name', '*.d.ts',
     ], { timeout: 5_000 });
     if (stdout.trim().length === 0) {
-      return { name: 'tsc', passed: true, message: 'skipped: no .ts files yet' };
+      return { name: 'tsc', passed: true, message: 'skipped: no .ts source files yet' };
     }
   } catch {
     // find failed — proceed with tsc and let it report the real error
