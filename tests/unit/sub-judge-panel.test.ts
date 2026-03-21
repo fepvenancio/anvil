@@ -1,8 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, writeFile, mkdir, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdtemp, writeFile, mkdir, rm, symlink } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execSync } from 'node:child_process';
+
+// Root of this project (for symlinking node_modules into temp dirs)
+const PROJECT_ROOT = resolve(import.meta.dirname, '..', '..');
 
 // ── tsc-judge tests ──────────────────────────────────────────────────────
 
@@ -88,6 +91,8 @@ describe('vitest-judge', () => {
 
   it('returns passed=true when vitest run succeeds', async () => {
     // Create a minimal vitest project with a passing test
+    // Symlink node_modules so npx vitest can resolve
+    await symlink(join(PROJECT_ROOT, 'node_modules'), join(tempDir, 'node_modules'));
     await writeFile(join(tempDir, 'package.json'), JSON.stringify({ type: 'module' }));
     await writeFile(join(tempDir, 'vitest.config.ts'), `
 import { defineConfig } from 'vitest/config';
@@ -107,6 +112,7 @@ describe('example', () => { it('passes', () => { expect(1).toBe(1); }); });
 
   it('returns passed=false when vitest run fails', async () => {
     // Create a minimal vitest project with a failing test
+    await symlink(join(PROJECT_ROOT, 'node_modules'), join(tempDir, 'node_modules'));
     await writeFile(join(tempDir, 'package.json'), JSON.stringify({ type: 'module' }));
     await writeFile(join(tempDir, 'vitest.config.ts'), `
 import { defineConfig } from 'vitest/config';
