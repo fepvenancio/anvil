@@ -52,10 +52,7 @@ export async function executeTask(
         allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep'],
         abortController: options?.abortController,
         tools: { type: 'preset', preset: 'claude_code' },
-        env: {
-          ...process.env,
-          ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY ?? '',
-        },
+        // Inherit parent environment — Claude Code, Gemini CLI, etc. provide auth automatically
       },
     });
 
