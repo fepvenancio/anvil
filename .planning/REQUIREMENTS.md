@@ -17,9 +17,9 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Planner
 
-- [ ] **PLAN-01**: Planner Station accepts natural-language spec and produces a JSON plan with tasks, touch maps, and dependency graph
-- [ ] **PLAN-02**: Each task in the plan declares `writes[]`, `reads[]`, and `depends_on[]`
-- [ ] **PLAN-03**: Planner rejects plans with overlapping writes between tasks (merges into single task or re-plans)
+- [x] **PLAN-01**: Planner Station accepts natural-language spec and produces a JSON plan with tasks, touch maps, and dependency graph
+- [x] **PLAN-02**: Each task in the plan declares `writes[]`, `reads[]`, and `depends_on[]`
+- [x] **PLAN-03**: Planner rejects plans with overlapping writes between tasks (merges into single task or re-plans)
 - [x] **PLAN-04**: Plan is validated against a JSON schema before execution begins
 - [ ] **PLAN-05**: Single interactive prompt after plan generation: "Review plan before starting execution? (Y/n/edit)" — 'edit' opens plan JSON in $EDITOR, re-validates on save
 - [x] **PLAN-06**: Plan is saved to `.anvil/roadmap.json` for inspection
@@ -121,9 +121,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CLI-03 | Phase 5 | Pending |
 | CLI-04 | Phase 5 | Pending |
 | CLI-05 | Phase 1 | Complete |
-| PLAN-01 | Phase 2 | Pending |
-| PLAN-02 | Phase 2 | Pending |
-| PLAN-03 | Phase 2 | Pending |
+| PLAN-01 | Phase 2 | Complete |
+| PLAN-02 | Phase 2 | Complete |
+| PLAN-03 | Phase 2 | Complete |
 | PLAN-04 | Phase 1 | Complete |
 | PLAN-05 | Phase 2 | Pending |
 | PLAN-06 | Phase 1 | Complete |

@@ -48,8 +48,8 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 02-01-PLAN.md — Planner Station with structured outputs, overlap detection, topological sort
-- [ ] 02-02-PLAN.md — WorktreeManager, Worker executor, touch-map enforcement
+- [x] 02-01-PLAN.md — Planner Station with structured outputs, overlap detection, topological sort
+- [x] 02-02-PLAN.md — WorktreeManager, Worker executor, touch-map enforcement
 - [ ] 02-03-PLAN.md — Plan review UI, sequential runner, CLI pipeline wiring
 
 ### Phase 3: Parallel Waves and Quality Gates
