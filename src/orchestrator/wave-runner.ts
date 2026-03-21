@@ -49,7 +49,7 @@ export async function executeInWaves(
   const worktreeManager = new WorktreeManager(baseDir);
   await worktreeManager.pruneStale();
 
-  const waves = topologicalWaves(plan.tasks);
+  let waves = topologicalWaves(plan.tasks);
   const taskMap = new Map(plan.tasks.map((t) => [t.id, t]));
   const git = simpleGit(baseDir);
   const allResults: WorkerResult[] = [];
@@ -67,8 +67,58 @@ export async function executeInWaves(
   process.on('SIGTERM', cleanup);
 
   try {
+    // Pre-flight: if Wave 1 is a single scaffold task (task-001 with no deps),
+    // run it synchronously and skip judges. Scaffold creates config files only —
+    // tsc/vitest have nothing to check and would fail with "no inputs found."
+    if (waves.length > 0 && waves[0].taskIds.length === 1) {
+      const scaffoldId = waves[0].taskIds[0];
+      const scaffoldTask = taskMap.get(scaffoldId);
+      if (scaffoldTask && scaffoldTask.dependsOn.length === 0 && scaffoldId === 'task-001') {
+        progress.waveStart(1, waves.length, 1);
+        progress.taskStart(1, scaffoldId);
+
+        const wt = await worktreeManager.create(scaffoldId);
+        const abortCtrl = new AbortController();
+        const timeoutHandle = setTimeout(() => abortCtrl.abort(), config.workerTimeoutMs);
+        let scaffoldResult: WorkerResult;
+        try {
+          scaffoldResult = await executeTask(scaffoldTask, wt.worktreePath, config, { abortController: abortCtrl });
+        } finally {
+          clearTimeout(timeoutHandle);
+        }
+
+        if (scaffoldResult.success) {
+          if (scaffoldResult.usage && options?.costTracker) {
+            options.costTracker.recordFromResponse(
+              { usage: { input_tokens: scaffoldResult.usage.input_tokens, output_tokens: scaffoldResult.usage.output_tokens, cache_creation_input_tokens: scaffoldResult.usage.cache_creation_input_tokens ?? undefined, cache_read_input_tokens: scaffoldResult.usage.cache_read_input_tokens ?? undefined } },
+              `worker:${scaffoldId}`, config.model, 1,
+            );
+          }
+          await worktreeManager.commitInWorktree(scaffoldId, `feat(anvil): ${scaffoldTask.description.slice(0, 72)}`, scaffoldTask.writes);
+          await worktreeManager.mergeWaveBranches([scaffoldId]);
+          // Post-merge npm install for scaffold
+          try {
+            await stat(join(baseDir, 'package.json'));
+            await execFileAsync('npm', ['install', '--ignore-scripts'], { cwd: baseDir, timeout: 120_000 });
+          } catch { /* no package.json */ }
+          progress.taskComplete(1, scaffoldId, scaffoldResult.filesWritten.length);
+          progress.waveComplete(1, 1);
+          allResults.push(scaffoldResult);
+          waveReports.push({ waveNumber: 1, taskResults: [scaffoldResult], merged: [scaffoldId], failed: [] });
+        } else {
+          progress.taskFailed(1, scaffoldId, scaffoldResult.error ?? 'unknown');
+          progress.waveHalted(1, ['scaffold task failed']);
+          await worktreeManager.cleanup(scaffoldId);
+          return { success: false, results: [scaffoldResult], waveReports: [], judgeReports: [], haltedAtWave: 1, failedTasks: [scaffoldId] };
+        }
+        await worktreeManager.cleanup(scaffoldId);
+        // Skip Wave 1 in the main loop (already executed as pre-flight)
+        waves = waves.slice(1);
+      }
+    }
+
     for (const wave of waves) {
-      progress.waveStart(wave.waveNumber, waves.length, wave.taskIds.length);
+      progress.waveStart(wave.waveNumber, waves.length + (waveReports.length > 0 ? 1 : 0), wave.taskIds.length);
 
       const limit = pLimit(config.maxWorkers);
       const waveResults: WorkerResult[] = [];

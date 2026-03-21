@@ -88,7 +88,8 @@ export class WorktreeManager {
 
   /**
    * Merges branches for the given taskIds to main in sorted order (deterministic).
-   * On merge conflict, aborts merge and records taskId as failed.
+   * On merge conflict, aborts merge and stops — remaining tasks are not attempted
+   * (they would also conflict since the branch state is inconsistent).
    * Does NOT clean up worktrees (caller handles that).
    */
   async mergeWaveBranches(
@@ -110,13 +111,17 @@ export class WorktreeManager {
         await this.git.merge([info.branch, '--no-ff']);
         merged.push(taskId);
       } catch {
-        // Merge conflict -- abort and record as failed
+        // Merge conflict — abort and stop merging remaining branches
         try {
           await this.git.merge(['--abort']);
         } catch {
           // Already aborted or not in merge state
         }
         failed.push(taskId);
+        // Abort remaining merges — they'll conflict too since the conflicting
+        // task's changes aren't in main yet. The wave retry loop will re-execute
+        // failed tasks with the successful merges as context.
+        break;
       }
     }
 

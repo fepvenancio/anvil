@@ -1,6 +1,6 @@
 {
   "name": "anvil-ai",
-  "version": "0.2.5",
+  "version": "0.3.0",
   "description": "Lightweight AI Code Factory — Build anything from a single command. Pure TypeScript, zero setup.",
   "license": "MIT",
   "publishConfig": {

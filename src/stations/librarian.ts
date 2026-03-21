@@ -31,6 +31,9 @@ export async function runLibrarian(
     .map((t) => `- ${t.id}: ${t.description} (writes: ${t.writes.join(', ')})`)
     .join('\n');
 
+  // Read actual source files so docs describe what was BUILT, not just planned
+  const sourceSnippets = await readSourceFiles(projectDir, plan);
+
   // ── README generation ──
   const readmePrompt = `Generate a README.md for this project. Return ONLY the markdown content, no code fences.
 
@@ -52,7 +55,10 @@ Reasoning: ${highCourtReport.reasoning}
 ${highCourtReport.concerns.length > 0 ? `Concerns: ${highCourtReport.concerns.join('; ')}` : ''}
 
 ## Tasks Completed
-${taskDescriptions}`;
+${taskDescriptions}
+
+## Source Code (actual implementation)
+${sourceSnippets}`;
 
   const readmeConv = query({
     prompt: readmePrompt,
@@ -92,7 +98,10 @@ ${taskDescriptions}
 ${invariantSection}
 
 ## High Court Reasoning
-${highCourtReport.reasoning}`;
+${highCourtReport.reasoning}
+
+## Source Code (actual implementation)
+${sourceSnippets}`;
 
   const archConv = query({
     prompt: archPrompt,
@@ -116,6 +125,41 @@ ${highCourtReport.reasoning}`;
   await writeFile(architecturePath, archContent);
 
   return { readmePath, architecturePath };
+}
+
+/**
+ * Read source files that tasks wrote, so the Librarian documents actual code, not just plans.
+ * Returns a markdown string with file contents (truncated for context window).
+ */
+async function readSourceFiles(projectDir: string, plan: Plan): Promise<string> {
+  const sourceExts = new Set(['.ts', '.tsx', '.js', '.jsx']);
+  const configExts = new Set(['.config.ts', '.config.js', '.config.mts']);
+  const lines: string[] = [];
+  let totalChars = 0;
+  const MAX_CHARS = 20_000; // Cap to avoid blowing context window
+
+  for (const task of plan.tasks) {
+    for (const file of task.writes) {
+      const ext = file.slice(file.lastIndexOf('.'));
+      if (!sourceExts.has(ext)) continue;
+      if (configExts.has(file.slice(file.lastIndexOf('/')))) continue;
+
+      try {
+        let content = await readFile(join(projectDir, file), 'utf-8');
+        if (totalChars + content.length > MAX_CHARS) {
+          content = content.slice(0, MAX_CHARS - totalChars) + '\n// ... truncated';
+        }
+        lines.push(`### ${file}\n\`\`\`typescript\n${content}\n\`\`\`\n`);
+        totalChars += content.length;
+        if (totalChars >= MAX_CHARS) break;
+      } catch {
+        // File doesn't exist
+      }
+    }
+    if (totalChars >= MAX_CHARS) break;
+  }
+
+  return lines.length > 0 ? lines.join('\n') : '(no source files found)';
 }
 
 /**
