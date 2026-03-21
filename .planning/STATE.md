@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-stopped_at: Completed 01-01-PLAN.md
-last_updated: "2026-03-21T00:19:41.040Z"
+stopped_at: Completed 01-02-PLAN.md
+last_updated: "2026-03-21T00:25:58.932Z"
 progress:
   total_phases: 5
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 2
-  completed_plans: 1
+  completed_plans: 2
 ---
 
 # Project State
@@ -47,6 +47,7 @@ Plan: 2 of 2
 
 *Updated after each plan completion*
 | Phase 01 P01 | 3min | 3 tasks | 12 files |
+| Phase 01 P02 | 3min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -58,6 +59,8 @@ Recent decisions affecting current work:
 - Roadmap: 5-phase bottom-up build. Planner ships Phase 2 (risk-first). Cost tracking ships Phase 4 alongside review.
 - [Phase 01]: Used zod/v4 sub-path import for Zod 4 API
 - [Phase 01]: Removed @anthropic-ai/sdk and simple-git from Phase 1 deps (re-add in Phase 2)
+- [Phase 01]: Used async stat() for ESM-compatible CLI smoke tests
+- [Phase 01]: Added .gitignore for .anvil/, dist/, node_modules/ repo hygiene
 
 ### Pending Todos
 
@@ -69,6 +72,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-21T00:19:41.039Z
-Stopped at: Completed 01-01-PLAN.md
+Last session: 2026-03-21T00:25:58.930Z
+Stopped at: Completed 01-02-PLAN.md
 Resume file: None

@@ -13,7 +13,7 @@ Requirements for initial release. Each maps to roadmap phases.
 - [ ] **CLI-02**: User can run `anvil status` to see the current/last build state and audit trail
 - [ ] **CLI-03**: User can run `anvil cost` to see token usage and cost breakdown per agent per wave
 - [ ] **CLI-04**: User can run `anvil logs` to view detailed build logs for any wave or task
-- [ ] **CLI-05**: CLI prints config summary on startup (project name, model, max workers)
+- [x] **CLI-05**: CLI prints config summary on startup (project name, model, max workers)
 
 ### Planner
 
@@ -120,7 +120,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CLI-02 | Phase 5 | Pending |
 | CLI-03 | Phase 5 | Pending |
 | CLI-04 | Phase 5 | Pending |
-| CLI-05 | Phase 1 | Pending |
+| CLI-05 | Phase 1 | Complete |
 | PLAN-01 | Phase 2 | Pending |
 | PLAN-02 | Phase 2 | Pending |
 | PLAN-03 | Phase 2 | Pending |

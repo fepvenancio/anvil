@@ -33,7 +33,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 Plans:
 - [x] 01-01-PLAN.md -- Project scaffold, Zod schemas, and test infrastructure
-- [ ] 01-02-PLAN.md -- Core modules (anvil-dir, config-loader, validator, logger) and CLI entry point
+- [x] 01-02-PLAN.md -- Core modules (anvil-dir, config-loader, validator, logger) and CLI entry point
 
 ### Phase 2: Planner and Sequential Execution
 **Goal**: A user can provide a natural-language spec and get a validated plan with tasks, then watch a single Worker execute each task sequentially in git worktrees with atomic commits
