@@ -201,6 +201,7 @@ describe('touch-map-judge', () => {
       reads: [],
       dependsOn: [],
       acceptanceCriteria: [],
+      exports: [],
     }];
 
     const { runTouchMapCheck } = await import('../../src/judges/touch-map-judge.js');
@@ -239,16 +240,16 @@ describe('sub-judge-panel', () => {
     const report = await runSubJudges(tempDir, 1, [], baselineSha);
 
     expect(report.waveNumber).toBe(1);
-    expect(report.checks).toHaveLength(4);
+    expect(report.checks).toHaveLength(5);
     expect(report.allPassed).toBe(true);
     expect(report.timestamp).toBeDefined();
     // Validate ISO datetime
     expect(() => new Date(report.timestamp)).not.toThrow();
     expect(new Date(report.timestamp).toISOString()).toBe(report.timestamp);
 
-    // All four check names should be present
+    // All five check names should be present
     const names = report.checks.map(c => c.name).sort();
-    expect(names).toEqual(['security', 'touch-map', 'tsc', 'vitest']);
+    expect(names).toEqual(['interface', 'security', 'touch-map', 'tsc', 'vitest']);
   });
 
   it('returns allPassed=false when one judge fails but includes all checks', async () => {
@@ -265,13 +266,14 @@ describe('sub-judge-panel', () => {
       reads: [],
       dependsOn: [],
       acceptanceCriteria: [],
+      exports: [],
     }];
 
     const { runSubJudges } = await import('../../src/judges/sub-judge-panel.js');
     const report = await runSubJudges(tempDir, 2, tasks, baselineSha);
 
     expect(report.waveNumber).toBe(2);
-    expect(report.checks).toHaveLength(4);
+    expect(report.checks).toHaveLength(5);
     expect(report.allPassed).toBe(false);
 
     // touch-map should fail, tsc and vitest should pass (skip)
@@ -303,7 +305,7 @@ describe('sub-judge-panel', () => {
     const content = await readFile(reportPath, 'utf-8');
     const saved = JSON.parse(content);
     expect(saved.waveNumber).toBe(3);
-    expect(saved.checks).toHaveLength(4);
+    expect(saved.checks).toHaveLength(5);
     expect(saved.allPassed).toBe(true);
   });
 
@@ -319,8 +321,8 @@ describe('sub-judge-panel', () => {
     const report = await runSubJudges(tempDir, 1, [], baselineSha);
     const elapsed = Date.now() - start;
 
-    // All four judges should have run
-    expect(report.checks).toHaveLength(4);
+    // All five judges should have run
+    expect(report.checks).toHaveLength(5);
     // Should complete reasonably fast (all skip since no tsconfig/tests/changes)
     expect(elapsed).toBeLessThan(5000);
   });

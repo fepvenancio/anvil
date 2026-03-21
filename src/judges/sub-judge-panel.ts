@@ -6,6 +6,7 @@ import { runTscCheck } from './tsc-judge.js';
 import { runVitestCheck } from './vitest-judge.js';
 import { runTouchMapCheck } from './touch-map-judge.js';
 import { runSecurityCheck } from './security-judge.js';
+import { runInterfaceCheck } from './interface-judge.js';
 
 export async function runSubJudges(
   projectDir: string,
@@ -13,12 +14,25 @@ export async function runSubJudges(
   tasks: Task[],
   baselineSha: string,
 ): Promise<SubJudgeReport> {
-  const checks: SubJudgeCheck[] = await Promise.all([
-    runTscCheck(projectDir),
+  // Run tsc FIRST — it does npm install which vitest needs.
+  // Without this ordering, vitest can fail intermittently when deps aren't installed yet.
+  const tscResult = await runTscCheck(projectDir);
+
+  // Now run the remaining judges in parallel (deps are installed)
+  const [vitestResult, touchMapResult, securityResult, interfaceResult] = await Promise.all([
     runVitestCheck(projectDir),
     runTouchMapCheck(projectDir, baselineSha, tasks),
     runSecurityCheck(projectDir),
+    runInterfaceCheck(projectDir, tasks),
   ]);
+
+  const checks: SubJudgeCheck[] = [
+    tscResult,
+    vitestResult,
+    touchMapResult,
+    securityResult,
+    interfaceResult,
+  ];
 
   const report: SubJudgeReport = {
     waveNumber,

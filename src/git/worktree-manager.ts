@@ -1,7 +1,11 @@
 import { simpleGit, type SimpleGit } from 'simple-git';
 import { join } from 'node:path';
-import { rm, writeFile, access } from 'node:fs/promises';
+import { rm, writeFile, access, stat } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
 
 export class WorktreeManager {
   private git: SimpleGit;
@@ -27,6 +31,18 @@ export class WorktreeManager {
       await access(gitignorePath);
     } catch {
       await writeFile(gitignorePath, 'node_modules/\ndist/\n.anvil/\n*.log\n');
+    }
+
+    // Install dependencies if package.json exists — ensures workers can run tsc/vitest
+    // in their self-verification step without relying on the prompt to tell them.
+    try {
+      await stat(join(worktreePath, 'package.json'));
+      await execFileAsync('npm', ['install', '--ignore-scripts'], {
+        cwd: worktreePath,
+        timeout: 120_000,
+      });
+    } catch {
+      // No package.json or install failed — worker will handle it
     }
 
     this.activeWorktrees.set(taskId, { worktreePath, branch });
