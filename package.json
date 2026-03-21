@@ -1,18 +1,46 @@
 {
-  "name": "anvil",
+  "name": "anvil-ai",
   "version": "0.1.0",
-  "description": "Lightweight GSD-Powered Code Factory (Forge successor)",
+  "description": "Lightweight AI Code Factory — Build anything from a single command. Pure TypeScript, zero setup.",
   "license": "MIT",
   "type": "module",
   "bin": {
     "anvil": "dist/cli.js"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "ai",
+    "autonomous-agents",
+    "code-generation",
+    "typescript",
+    "claude",
+    "cli",
+    "developer-tools",
+    "forge"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fepvenancio/anvil.git"
   },
   "engines": {
     "node": ">=22"
   },
   "scripts": {
     "dev": "tsx src/cli.ts",
-    "build": "tsup",
+    "build": "tsc",
+    "prepublishOnly": "npm run build && npm test",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"

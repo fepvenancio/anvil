@@ -12,7 +12,7 @@ Anvil is a pure TypeScript CLI that orchestrates a team of AI agents to build en
 
 ```bash
 # When published to npm (coming soon):
-npx anvil@latest run "Build a REST API for a todo app"
+npx anvil-ai@latest run "Build a REST API for a todo app"
 
 # From source (now):
 git clone https://github.com/fepvenancio/anvil.git
@@ -33,7 +33,7 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 npx tsx src/cli.ts run "Build a REST API for a todo app with Express and TypeScript"
 
 # Once published:
-npx anvil run "Build a REST API for a todo app with Express and TypeScript"
+npx anvil-ai run "Build a REST API for a todo app with Express and TypeScript"
 ```
 
 That's it. One command. Anvil will:
@@ -117,7 +117,7 @@ You ──► "Build a todo API"
 ### Key Principles
 
 - **Pure TypeScript** — No Docker, no Python, no Dolt. Node 22+ and an API key.
-- **One command** — `npx anvil run "..."` does everything. Zero setup.
+- **One command** — `npx anvil-ai run "..."` does everything. Zero setup.
 - **Git worktrees** — Each task gets its own worktree. No merge conflicts, ever.
 - **Planner never writes code** — Workers never plan. Clean cognitive separation.
 - **Touch maps enforce scope** — Workers can only modify files they declared. Sub-Judges verify.
