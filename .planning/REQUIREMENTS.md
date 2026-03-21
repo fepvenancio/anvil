@@ -47,8 +47,8 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Cost
 
-- [ ] **COST-01**: Token usage (input/output/cache) is tracked per agent call
-- [ ] **COST-02**: Cost is calculated per wave and per session using model pricing
+- [x] **COST-01**: Token usage (input/output/cache) is tracked per agent call
+- [x] **COST-02**: Cost is calculated per wave and per session using model pricing
 - [ ] **COST-03**: Cost summary is displayed at build completion
 - [ ] **COST-04**: Cost report is saved to `.anvil/cost-report.json`
 
@@ -142,8 +142,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | REVW-03 | Phase 4 | Pending |
 | REVW-04 | Phase 4 | Pending |
 | REVW-05 | Phase 4 | Pending |
-| COST-01 | Phase 4 | Pending |
-| COST-02 | Phase 4 | Pending |
+| COST-01 | Phase 4 | Complete |
+| COST-02 | Phase 4 | Complete |
 | COST-03 | Phase 4 | Pending |
 | COST-04 | Phase 4 | Pending |
 | LIBR-01 | Phase 4 | Pending |
