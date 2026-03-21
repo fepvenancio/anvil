@@ -54,9 +54,9 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Librarian
 
-- [ ] **LIBR-01**: Librarian auto-generates README.md from build artifacts after High Court approval
-- [ ] **LIBR-02**: Librarian auto-generates ARCHITECTURE.md from project structure and High Court notes
-- [ ] **LIBR-03**: Generated docs are committed as atomic commits in the project's git history
+- [x] **LIBR-01**: Librarian auto-generates README.md from build artifacts after High Court approval
+- [x] **LIBR-02**: Librarian auto-generates ARCHITECTURE.md from project structure and High Court notes
+- [x] **LIBR-03**: Generated docs are committed as atomic commits in the project's git history
 
 ### CLI UX
 
@@ -146,9 +146,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | COST-02 | Phase 4 | Complete |
 | COST-03 | Phase 4 | Pending |
 | COST-04 | Phase 4 | Pending |
-| LIBR-01 | Phase 4 | Pending |
-| LIBR-02 | Phase 4 | Pending |
-| LIBR-03 | Phase 4 | Pending |
+| LIBR-01 | Phase 4 | Complete |
+| LIBR-02 | Phase 4 | Complete |
+| LIBR-03 | Phase 4 | Complete |
 | CLUX-01 | Phase 5 | Pending |
 | CLUX-02 | Phase 5 | Pending |
 | CLUX-03 | Phase 5 | Pending |
