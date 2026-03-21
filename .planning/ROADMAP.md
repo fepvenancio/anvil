@@ -99,11 +99,11 @@ Plans:
   3. User can run `anvil logs` to view detailed logs for any specific wave or task
   4. Live progress display shows current wave, task status, and judge verdicts during a build
   5. Output is color-coded (green for passed, yellow for warnings, red for failures) and build completion shows a summary with next steps
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 05-01: TBD
-- [ ] 05-02: TBD
+- [ ] 05-01-PLAN.md — Status, cost, and logs CLI subcommands with unit tests
+- [ ] 05-02-PLAN.md — Live progress display (ora spinners, color-coded output) and completion summary banner
 
 ## Progress
 
@@ -116,4 +116,4 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 | 2. Planner and Sequential Execution | 3/4 | Gap closure | - |
 | 3. Parallel Waves and Quality Gates | 0/3 | Planned | - |
 | 4. AI Review and Audit Trail | 4/4 | Complete   | 2026-03-21 |
-| 5. CLI Polish | 0/? | Not started | - |
+| 5. CLI Polish | 0/2 | Planned | - |
