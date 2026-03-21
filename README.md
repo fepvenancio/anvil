@@ -4,70 +4,157 @@
 
 Anvil is a pure TypeScript CLI that orchestrates a team of AI agents to build entire projects from a single command. Spiritual successor to [Forge](https://github.com/fepvenancio/forge) — same structured agent roles, same review rigor, radically simplified.
 
-```bash
-npx anvil run "Build a REST API for a todo app"
-```
-
-> Under active development. Coming soon to npm.
-
 ---
 
-## What It Does
+## Quick Start
 
-You describe what to build. Anvil handles the rest:
+### 1. Install
 
-1. **Planner** analyzes your spec and produces a validated execution plan
-2. **Workers** execute tasks in parallel, each in an isolated git worktree
-3. **Sub-Judges** run mechanical checks after every wave (tsc, tests, touch-map compliance)
-4. **High Court** performs a final AI architectural review (merge / escalate / abort)
-5. **Librarian** auto-generates README and ARCHITECTURE docs
-6. **Cost Auditor** tracks every token spent
+```bash
+# When published to npm (coming soon):
+npx anvil@latest run "Build a REST API for a todo app"
 
-Every change is an atomic git commit. Bad architecture gets rolled back. You get a complete project with clean history and full audit trail.
-
-## Architecture
-
-```
-Spec ──► Planner ──► Plan Review (Y/n/edit)
-                         │
-                    ┌────▼────┐
-                    │  Wave 1  │  Independent tasks run in parallel
-                    │ Workers  │  Each in isolated git worktree
-                    └────┬────┘
-                         │
-                    Sub-Judges ──► tsc / vitest / touch-map
-                         │
-                    ┌────▼────┐
-                    │  Wave 2  │  Dependent tasks execute next
-                    │ Workers  │
-                    └────┬────┘
-                         │
-                    Sub-Judges
-                         │
-                    High Court ──► merge / human_required / abort
-                         │
-                    Librarian ──► README.md + ARCHITECTURE.md
-                         │
-                    Cost Report ──► .anvil/cost-report.json
+# From source (now):
+git clone https://github.com/fepvenancio/anvil.git
+cd anvil
+npm install
 ```
 
-## Key Principles
+### 2. Set your API key
 
-- **Pure TypeScript** — No Docker, no Python, no Dolt. Node 22+ and an API key.
-- **Git worktrees for isolation** — Each task gets its own worktree. No merge conflicts.
-- **Planner never writes code** — Workers never plan. Clean separation.
-- **Touch maps enforce scope** — Workers can only modify declared files.
-- **Fail fast, escalate to human** — Better to halt than guess.
-- **Ordered waves** — Topological sort eliminates coordination bugs entirely.
+```bash
+export ANTHROPIC_API_KEY="sk-ant-..."
+```
+
+### 3. Build something
+
+```bash
+# From source:
+npx tsx src/cli.ts run "Build a REST API for a todo app with Express and TypeScript"
+
+# Once published:
+npx anvil run "Build a REST API for a todo app with Express and TypeScript"
+```
+
+That's it. One command. Anvil will:
+
+1. Generate a validated execution plan
+2. Ask you to review it (`Y/n/edit`)
+3. Execute tasks in parallel waves — each in its own git worktree
+4. Run mechanical quality checks after every wave
+5. Perform an AI architectural review
+6. Auto-generate documentation
+7. Show you what it cost
+
+You get a complete project with clean git history and full audit trail.
+
+---
 
 ## Commands
 
 ```bash
-anvil run "spec"     # Build from natural language
-anvil status         # View build state + audit trail
-anvil cost           # Token/cost breakdown per agent per wave
-anvil logs           # Detailed build logs (--wave, --task, --level filters)
+anvil run "spec"              # Build from natural language
+anvil run "spec" --sequential # Force sequential execution (no parallel waves)
+anvil status                  # View last build state + audit trail
+anvil cost                    # Token/cost breakdown per agent per wave
+anvil cost --by-wave          # Group costs by wave
+anvil logs                    # View build logs
+anvil logs --wave 2           # Logs for a specific wave
+anvil logs --task task-003    # Logs for a specific task
+anvil logs --level error      # Filter by log level
 ```
+
+---
+
+## How It Works
+
+```
+You ──► "Build a todo API"
+              │
+         ┌────▼─────┐
+         │  Planner  │  Spec → JSON plan with tasks, dependencies, file ownership
+         └────┬─────┘
+              │
+         Plan Review ──► Y / n / edit (opens $EDITOR)
+              │
+         ┌────▼────┐
+         │  Wave 1  │  Independent tasks run in parallel (p-limit)
+         │ Workers  │  Each in isolated git worktree, atomic commits
+         └────┬────┘
+              │
+         Sub-Judges ──► tsc --noEmit / vitest run / touch-map check
+              │         (mechanical, no AI — deterministic gates)
+              │
+         ┌────▼────┐
+         │  Wave 2  │  Dependent tasks execute next
+         │ Workers  │  (only after Wave 1 merges + judges pass)
+         └────┬────┘
+              │
+         Sub-Judges
+              │
+         High Court ──► AI architectural review
+              │         merge ✓ / human_required ⚠ / abort ✗
+              │         (abort → git reset --hard, nothing leaks)
+              │
+         Librarian ──► README.md + ARCHITECTURE.md (committed)
+              │
+         Cost Report ──► .anvil/cost-report.json
+              │
+         Done ──► Clean git history, full audit trail, next steps
+```
+
+### Agent Roles
+
+| Agent | Type | What it does |
+|-------|------|-------------|
+| **Planner** | AI (structured output) | Spec → JSON plan with tasks, touch maps, dependency graph. Rejects overlapping writes. |
+| **Worker** | AI (tool use) | Executes one task in an isolated git worktree. Can only touch declared files. |
+| **Sub-Judges** | Mechanical (no AI) | tsc check, vitest run, touch-map violation detector. Run after every wave. |
+| **High Court** | AI (structured output) | End-of-build architectural review. Checks invariants, circular deps, coherence. |
+| **Librarian** | AI (text generation) | Generates README.md and ARCHITECTURE.md from build artifacts. |
+| **Cost Auditor** | Tracking (no AI) | Records tokens per call, calculates cost per wave/session. |
+
+### Key Principles
+
+- **Pure TypeScript** — No Docker, no Python, no Dolt. Node 22+ and an API key.
+- **One command** — `npx anvil run "..."` does everything. Zero setup.
+- **Git worktrees** — Each task gets its own worktree. No merge conflicts, ever.
+- **Planner never writes code** — Workers never plan. Clean cognitive separation.
+- **Touch maps enforce scope** — Workers can only modify files they declared. Sub-Judges verify.
+- **Fail fast** — Better to halt and ask than guess and ship bad code.
+- **Ordered waves** — Topological sort + parallel execution. No coordination bugs.
+- **Rollback on failure** — High Court abort → `git reset --hard`. Bad architecture never leaks into main.
+
+---
+
+## What You Get
+
+After `anvil run`, your project directory contains:
+
+```
+your-project/
+├── src/                    # Generated source code
+├── tests/                  # Generated tests
+├── README.md               # Auto-generated by Librarian
+├── ARCHITECTURE.md         # Auto-generated by Librarian
+├── package.json            # Project config
+└── .anvil/                 # Audit trail
+    ├── roadmap.json        # The execution plan
+    ├── cost-report.json    # Token usage + cost breakdown
+    ├── logs/               # Structured build logs (pino JSON)
+    └── reports/            # Sub-Judge + High Court reports
+```
+
+Plus a clean git history with descriptive commit messages:
+
+```
+feat: implement todo CRUD endpoints
+feat: add input validation with Zod
+test: add 12 passing integration tests
+docs: generate README and ARCHITECTURE
+```
+
+---
 
 ## Development
 
@@ -75,28 +162,51 @@ anvil logs           # Detailed build logs (--wave, --task, --level filters)
 git clone https://github.com/fepvenancio/anvil.git
 cd anvil
 npm install
+
 npm test              # 177 tests
 npm run typecheck     # strict mode, zero errors
 npm run dev -- run "Build a hello world Express app"
 ```
 
-Requires `ANTHROPIC_API_KEY` environment variable for `run` command.
+### Requirements
+
+- **Node.js 22+**
+- **ANTHROPIC_API_KEY** environment variable
+- **Git** (for worktree isolation)
+
+### Tech Stack
+
+| Dependency | Purpose |
+|-----------|---------|
+| `@anthropic-ai/sdk` | Claude API (structured outputs, tool use) |
+| `commander` | CLI framework |
+| `simple-git` | Git worktree management |
+| `zod` | Schema validation (plans, reports, config) |
+| `p-limit` | Parallel execution concurrency control |
+| `chalk` | Terminal colors |
+| `ora` | Progress spinners |
+| `pino` | Structured JSON logging |
+
+---
 
 ## Project Status
 
-**v1 complete** — 5 phases, 37 requirements, 177 tests.
+**v1 complete** — 5 phases, 37 requirements, 177 tests, all passing.
 
 | Component | Status |
 |-----------|--------|
-| CLI (run, status, cost, logs) | ✓ |
-| Planner Station | ✓ |
+| CLI (`run`, `status`, `cost`, `logs`) | ✓ |
+| Planner Station (structured outputs) | ✓ |
 | Worker + Git Worktrees | ✓ |
-| Parallel Wave Execution | ✓ |
+| Parallel Wave Execution (p-limit) | ✓ |
 | Sub-Judge Panel (tsc, vitest, touch-map) | ✓ |
 | High Court AI Review | ✓ |
 | Librarian (auto-docs) | ✓ |
-| Cost Tracking | ✓ |
+| Cost Tracking + Reports | ✓ |
 | Live Progress Display | ✓ |
+| Rollback on Abort | ✓ |
+
+Built with [GSD](https://github.com/glittercowboy/get-shit-done) workflow.
 
 ## License
 
