@@ -40,6 +40,64 @@ export class WorktreeManager {
     await this.git.merge([branch, '--no-ff']);
   }
 
+  /**
+   * Commits staged changes in the worktree for the given task.
+   * Separated from merge for wave-based execution.
+   * Returns true if changes were committed, false if nothing to commit.
+   */
+  async commitInWorktree(taskId: string, message: string): Promise<boolean> {
+    const info = this.activeWorktrees.get(taskId);
+    if (!info) {
+      throw new Error(`No active worktree for task ${taskId}`);
+    }
+    const { worktreePath } = info;
+    const worktreeGit = simpleGit(worktreePath);
+    await worktreeGit.add('.');
+    const status = await worktreeGit.status();
+    if (status.staged.length === 0) {
+      return false;
+    }
+    await worktreeGit.commit(message);
+    return true;
+  }
+
+  /**
+   * Merges branches for the given taskIds to main in sorted order (deterministic).
+   * On merge conflict, aborts merge and records taskId as failed.
+   * Does NOT clean up worktrees (caller handles that).
+   */
+  async mergeWaveBranches(
+    taskIds: string[],
+  ): Promise<{ merged: string[]; failed: string[] }> {
+    const merged: string[] = [];
+    const failed: string[] = [];
+
+    // Sort for deterministic merge order
+    const sorted = [...taskIds].sort();
+
+    for (const taskId of sorted) {
+      const info = this.activeWorktrees.get(taskId);
+      if (!info) {
+        failed.push(taskId);
+        continue;
+      }
+      try {
+        await this.git.merge([info.branch, '--no-ff']);
+        merged.push(taskId);
+      } catch {
+        // Merge conflict -- abort and record as failed
+        try {
+          await this.git.merge(['--abort']);
+        } catch {
+          // Already aborted or not in merge state
+        }
+        failed.push(taskId);
+      }
+    }
+
+    return { merged, failed };
+  }
+
   async cleanup(taskId: string): Promise<void> {
     const info = this.activeWorktrees.get(taskId);
     if (!info) {
