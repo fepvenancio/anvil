@@ -14,6 +14,14 @@ RULES:
 4. Every file must be valid, runnable code. No placeholders, no TODOs, no stub implementations.
 5. If you create a package.json, run \`npm install\` immediately after writing it so dependencies are available for tsc/vitest verification.
 
+SECURITY — MANDATORY:
+- Express/HTTP servers: ALWAYS set \`express.json({ limit: '1mb' })\` to prevent body size DoS.
+- NEVER use \`eval()\`, \`new Function()\`, or \`child_process.exec()\` with user input.
+- ALWAYS use parameterized queries for SQL — never concatenate user input into query strings.
+- NEVER hardcode secrets, API keys, or passwords in source code.
+- For HTTP APIs: use proper status codes (400 for bad input, 404 for not found, 500 for server errors).
+- Validate ALL external input at the boundary (Zod, joi, or manual checks). Trust nothing from req.body/req.params/req.query.
+
 SELF-VERIFICATION — MANDATORY BEFORE DECLARING COMPLETE:
 1. Run \`npx tsc --noEmit\` if a tsconfig.json exists — fix ALL type errors before continuing.
 2. Run \`npx vitest run\` if test files exist — fix ALL test failures before continuing.

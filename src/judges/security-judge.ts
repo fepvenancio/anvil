@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { join, extname } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -45,6 +45,30 @@ const SECURITY_RULES: Array<{
     name: 'no-insecure-http',
     pattern: /['"]http:\/\/(?!localhost|127\.0\.0\.1|0\.0\.0\.0)/,
     description: 'Insecure HTTP URL (use HTTPS)',
+  },
+  {
+    name: 'no-exec-with-input',
+    pattern: /(?:exec|execSync|spawn)\s*\([^)]*(?:req\.|input|param|arg|user)/i,
+    fileExts: ['.ts', '.js', '.mts', '.mjs'],
+    description: 'Command execution with user input — injection risk',
+  },
+  {
+    name: 'no-cors-wildcard',
+    pattern: /cors\(\s*\)|origin:\s*['"]?\*['"]?|Access-Control-Allow-Origin['"]\s*,\s*['"]\*/,
+    fileExts: ['.ts', '.js', '.mts', '.mjs'],
+    description: 'CORS wildcard (*) allows any origin',
+  },
+  {
+    name: 'no-express-json-no-limit',
+    pattern: /express\.json\s*\(\s*\)/,
+    fileExts: ['.ts', '.js', '.mts', '.mjs'],
+    description: 'express.json() without body size limit — DoS risk. Use express.json({ limit: "1mb" })',
+  },
+  {
+    name: 'no-dangerouslySetInnerHTML',
+    pattern: /dangerouslySetInnerHTML/,
+    fileExts: ['.tsx', '.jsx'],
+    description: 'dangerouslySetInnerHTML — XSS risk',
   },
 ];
 
@@ -99,6 +123,37 @@ export async function runSecurityCheck(projectDir: string): Promise<SubJudgeChec
         }
       }
     }
+  }
+
+  // Run npm audit if package-lock.json exists (checks for known vulnerable deps)
+  try {
+    await stat(join(projectDir, 'package-lock.json'));
+    try {
+      await execFileAsync('npm', ['audit', '--audit-level=high', '--json'], {
+        cwd: projectDir,
+        timeout: 30_000,
+      });
+    } catch (err: unknown) {
+      const auditErr = err as { stdout?: string };
+      if (auditErr.stdout) {
+        try {
+          const audit = JSON.parse(auditErr.stdout);
+          const highOrCritical = (audit.metadata?.vulnerabilities?.high ?? 0) + (audit.metadata?.vulnerabilities?.critical ?? 0);
+          if (highOrCritical > 0) {
+            violations.push({
+              file: 'package-lock.json',
+              line: 1,
+              rule: 'npm-audit',
+              snippet: `${highOrCritical} high/critical vulnerability(ies) in dependencies`,
+            });
+          }
+        } catch {
+          // Couldn't parse audit output — skip
+        }
+      }
+    }
+  } catch {
+    // No package-lock.json — skip audit
   }
 
   if (violations.length === 0) {
