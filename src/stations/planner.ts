@@ -96,7 +96,13 @@ Rules:
   const jsonStr = (jsonMatch[1] ?? resultText).trim();
 
   // Parse and validate with Zod
-  const parseResult = PlanSchema.safeParse(JSON.parse(jsonStr));
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonStr);
+  } catch {
+    throw new Error(`Planner returned invalid JSON: ${jsonStr.slice(0, 200)}`);
+  }
+  const parseResult = PlanSchema.safeParse(parsed);
   if (!parseResult.success) {
     throw new Error(`Planner output failed schema validation: ${parseResult.error.message}`);
   }

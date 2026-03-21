@@ -12,7 +12,7 @@ export const TaskSchema = z.object({
   reads: z.array(z.string()),
   dependsOn: z.array(z.string()),
   acceptanceCriteria: z.array(z.string()),
-  exports: z.array(ExportSchema).optional(),
+  exports: z.array(ExportSchema).default([]),
 });
 
 export const PlanSchema = z.object({

@@ -33,14 +33,14 @@ export class WorktreeManager {
     return { worktreePath, branch };
   }
 
-  async commitAndMerge(taskId: string, message: string): Promise<void> {
+  async commitAndMerge(taskId: string, message: string, writes: string[]): Promise<void> {
     const info = this.activeWorktrees.get(taskId);
     if (!info) {
       throw new Error(`No active worktree for task ${taskId}`);
     }
     const { worktreePath, branch } = info;
     const worktreeGit = simpleGit(worktreePath);
-    await worktreeGit.add('.');
+    await stageFiles(worktreeGit, writes);
     const status = await worktreeGit.status();
     if (status.staged.length === 0) {
       return; // No changes to commit
@@ -54,14 +54,14 @@ export class WorktreeManager {
    * Separated from merge for wave-based execution.
    * Returns true if changes were committed, false if nothing to commit.
    */
-  async commitInWorktree(taskId: string, message: string): Promise<boolean> {
+  async commitInWorktree(taskId: string, message: string, writes: string[]): Promise<boolean> {
     const info = this.activeWorktrees.get(taskId);
     if (!info) {
       throw new Error(`No active worktree for task ${taskId}`);
     }
     const { worktreePath } = info;
     const worktreeGit = simpleGit(worktreePath);
-    await worktreeGit.add('.');
+    await stageFiles(worktreeGit, writes);
     const status = await worktreeGit.status();
     if (status.staged.length === 0) {
       return false;
@@ -142,6 +142,30 @@ export class WorktreeManager {
     const taskIds = [...this.activeWorktrees.keys()];
     for (const taskId of taskIds) {
       await this.cleanup(taskId);
+    }
+  }
+}
+
+// Common side-effect files that should be staged alongside declared writes
+const SIDE_EFFECT_FILES = [
+  'package-lock.json',
+  '.gitignore',
+  'yarn.lock',
+  'pnpm-lock.yaml',
+  'bun.lockb',
+];
+
+/**
+ * Stage only declared writes + common side-effect files.
+ * Silently skips files that don't exist (e.g. package-lock.json when no npm install ran).
+ */
+async function stageFiles(git: SimpleGit, writes: string[]): Promise<void> {
+  const filesToStage = [...writes, ...SIDE_EFFECT_FILES];
+  for (const file of filesToStage) {
+    try {
+      await git.add(file);
+    } catch {
+      // File doesn't exist or has no changes — skip silently
     }
   }
 }

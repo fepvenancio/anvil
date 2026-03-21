@@ -161,7 +161,7 @@ describe('wave-runner integration', { timeout: 30000 }, () => {
       { id: 'ok-2', description: 'OK 2', writes: ['ok-2.ts'], reads: [], dependsOn: [], acceptanceCriteria: [] },
     ]);
 
-    const result = await executeInWaves(plan, defaultConfig, { baseDir: tempDir });
+    const result = await executeInWaves(plan, defaultConfig, { baseDir: tempDir, maxWaveRetries: 0 });
 
     // ok-1 and ok-2 should have succeeded
     const successIds = result.results.filter((r) => r.success).map((r) => r.taskId);
@@ -185,7 +185,7 @@ describe('wave-runner integration', { timeout: 30000 }, () => {
       { id: 'wave2-task', description: 'W2', writes: ['wave2-task.ts'], reads: [], dependsOn: ['wave1-ok', 'wave1-fail'], acceptanceCriteria: [] },
     ]);
 
-    const result = await executeInWaves(plan, defaultConfig, { baseDir: tempDir });
+    const result = await executeInWaves(plan, defaultConfig, { baseDir: tempDir, maxWaveRetries: 0 });
 
     expect(result.success).toBe(false);
     expect(result.haltedAtWave).toBe(1);
@@ -209,7 +209,7 @@ describe('wave-runner integration', { timeout: 30000 }, () => {
       { id: 'bad', description: 'Bad task', writes: ['bad.ts'], reads: [], dependsOn: [], acceptanceCriteria: [] },
     ]);
 
-    const result = await executeInWaves(plan, defaultConfig, { baseDir: tempDir });
+    const result = await executeInWaves(plan, defaultConfig, { baseDir: tempDir, maxWaveRetries: 0 });
 
     expect(result.results).toHaveLength(2);
     const goodResult = result.results.find((r) => r.taskId === 'good');
@@ -265,7 +265,8 @@ describe('wave-runner integration', { timeout: 30000 }, () => {
       { id: 'jf-2', description: 'Judge fail wave 2', writes: ['jf-2.ts'], reads: [], dependsOn: ['jf-1'], acceptanceCriteria: [] },
     ]);
 
-    const result = await executeInWaves(plan, defaultConfig, { baseDir: tempDir });
+    // Set maxWaveRetries to 0 to test immediate halt (no retries)
+    const result = await executeInWaves(plan, defaultConfig, { baseDir: tempDir, maxWaveRetries: 0 });
 
     expect(result.success).toBe(false);
     expect(result.haltedAtWave).toBe(1);
@@ -300,7 +301,7 @@ describe('wave-runner integration', { timeout: 30000 }, () => {
       { id: 'both-fail', description: 'Fail', writes: ['both-fail.ts'], reads: [], dependsOn: [], acceptanceCriteria: [] },
     ]);
 
-    const result = await executeInWaves(plan, defaultConfig, { baseDir: tempDir });
+    const result = await executeInWaves(plan, defaultConfig, { baseDir: tempDir, maxWaveRetries: 0 });
 
     expect(result.success).toBe(false);
     expect(result.haltedAtWave).toBe(1);

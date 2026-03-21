@@ -82,6 +82,16 @@ export class ProgressDisplay {
     }
   }
 
+  waveRetry(waveNumber: number, attempt: number, maxRetries: number): void {
+    const msg = `Wave ${waveNumber} retry ${attempt}/${maxRetries} — re-executing failed tasks`;
+    if (this.spinner) {
+      this.spinner.warn(chalk.yellow(msg));
+      this.spinner = null;
+    } else {
+      console.log(chalk.yellow(msg));
+    }
+  }
+
   waveHalted(waveNumber: number, reasons: string[]): void {
     const msg = `Wave ${waveNumber} halted: ${reasons.join(' and ')}`;
     if (this.spinner) {

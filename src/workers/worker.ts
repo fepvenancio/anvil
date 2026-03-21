@@ -29,7 +29,7 @@ export async function executeTask(
   task: Task,
   worktreePath: string,
   config: AnvilConfig,
-  options?: { abortController?: AbortController },
+  options?: { abortController?: AbortController; retryContext?: string },
 ): Promise<WorkerResult> {
   // Build the prompt with task details
   let prompt = `## Task: ${task.description}\n\n`;
@@ -62,6 +62,10 @@ export async function executeTask(
   prompt += `Work in the current directory. Do not cd elsewhere.\n`;
   prompt += `After writing files, run \`npx tsc --noEmit\` and \`npx vitest run\` (if applicable) to verify your code compiles and tests pass. Fix any errors before finishing.\n`;
 
+  if (options?.retryContext) {
+    prompt += `\n### Previous Attempt Failed\n${options.retryContext}\n\nFix these issues in your implementation. Do NOT repeat the same mistakes.\n`;
+  }
+
   try {
     const conversation = query({
       prompt,
@@ -69,7 +73,7 @@ export async function executeTask(
         cwd: worktreePath,
         systemPrompt: WORKER_SYSTEM_PROMPT,
         model: config.model,
-        maxTurns: 30,
+        maxTurns: 15,
         permissionMode: 'bypassPermissions',
         allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep'],
         abortController: options?.abortController,

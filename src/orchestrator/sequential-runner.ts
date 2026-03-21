@@ -56,6 +56,7 @@ export async function executeSequentially(
           await worktreeManager.commitAndMerge(
             task.id,
             `feat(anvil): ${task.description.slice(0, 72)}`,
+            task.writes,
           );
           console.log(
             chalk.green(`  ✓ Task ${task.id} complete (${result.filesWritten.length} files)`),

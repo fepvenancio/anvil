@@ -50,7 +50,7 @@ describe('WorktreeManager', { timeout: 15000 }, () => {
     // Write a file in the worktree
     await writeFile(join(worktreePath, 'new-file.ts'), 'export const value = 42;');
 
-    await manager.commitAndMerge('002', 'feat: add new-file');
+    await manager.commitAndMerge('002', 'feat: add new-file', ['new-file.ts']);
 
     // Verify file exists in the main branch
     const git = simpleGit(tempDir);

@@ -109,7 +109,20 @@ Schema:
   const jsonMatch = resultText.match(/```(?:json)?\s*([\s\S]*?)```/) ?? [null, resultText];
   const jsonStr = (jsonMatch[1] ?? resultText).trim();
 
-  const parseResult = HighCourtReportSchema.safeParse(JSON.parse(jsonStr));
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonStr);
+  } catch {
+    // Return a safe fallback instead of crashing the pipeline
+    return {
+      verdict: 'human_required' as const,
+      reasoning: 'High Court returned unparseable response',
+      concerns: [],
+      invariantChecks: [],
+      timestamp: new Date().toISOString(),
+    };
+  }
+  const parseResult = HighCourtReportSchema.safeParse(parsed);
   if (!parseResult.success) {
     throw new Error(`High Court output failed schema validation: ${parseResult.error.message}`);
   }

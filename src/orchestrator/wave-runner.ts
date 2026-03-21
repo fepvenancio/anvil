@@ -35,10 +35,11 @@ export interface WaveExecutionResult {
 export async function executeInWaves(
   plan: Plan,
   config: AnvilConfig,
-  options?: { baseDir?: string; costTracker?: CostTracker; progress?: ProgressDisplay },
+  options?: { baseDir?: string; costTracker?: CostTracker; progress?: ProgressDisplay; maxWaveRetries?: number },
 ): Promise<WaveExecutionResult> {
   const baseDir = options?.baseDir ?? process.cwd();
   const progress = options?.progress ?? new ProgressDisplay();
+  const maxWaveRetries = options?.maxWaveRetries ?? 2;
   const worktreeManager = new WorktreeManager(baseDir);
   await worktreeManager.pruneStale();
 
@@ -112,6 +113,7 @@ export async function executeInWaves(
                 await worktreeManager.commitInWorktree(
                   taskId,
                   `feat(anvil): ${task.description.slice(0, 72)}`,
+                  task.writes,
                 );
                 progress.taskComplete(wave.waveNumber, taskId, result.filesWritten.length);
               } else {
@@ -183,7 +185,7 @@ export async function executeInWaves(
       const waveTasks = waveTaskIds
         .map((id) => taskMap.get(id))
         .filter((t): t is NonNullable<typeof t> => t != null);
-      const judgeReport = await runSubJudges(baseDir, wave.waveNumber, waveTasks, baselineSha);
+      let judgeReport = await runSubJudges(baseDir, wave.waveNumber, waveTasks, baselineSha);
       judgeReports.push(judgeReport);
 
       // Display judge results
@@ -191,10 +193,188 @@ export async function executeInWaves(
         progress.judgeResult(check);
       }
 
-      // If any task failed OR Sub-Judge failed, halt progression
-      const hasTaskFailures = failedInWave.length > 0 || mergeResult.failed.length > 0;
-      const hasJudgeFailures = !judgeReport.allPassed;
+      // If any task failed OR Sub-Judge failed, attempt retries before halting
+      let currentFailedInWave = [...failedInWave];
+      let currentMergeResult = mergeResult;
+      let hasTaskFailures = currentFailedInWave.length > 0 || currentMergeResult.failed.length > 0;
+      let hasJudgeFailures = !judgeReport.allPassed;
+      let retriesRemaining = maxWaveRetries;
 
+      while ((hasTaskFailures || hasJudgeFailures) && retriesRemaining > 0) {
+        const retryAttempt = maxWaveRetries - retriesRemaining + 1;
+        progress.waveRetry(wave.waveNumber, retryAttempt, maxWaveRetries);
+
+        // Collect error context for retry prompts
+        const errorDetails: string[] = [];
+        for (const r of waveResults.filter((r) => !r.success)) {
+          errorDetails.push(`Task ${r.taskId} failed: ${r.error ?? 'unknown error'}`);
+        }
+        for (const mfId of currentMergeResult.failed) {
+          errorDetails.push(`Task ${mfId} failed: merge conflict`);
+        }
+        if (hasJudgeFailures) {
+          for (const check of judgeReport.checks.filter((c) => !c.passed)) {
+            errorDetails.push(`Sub-Judge ${check.name} failed: ${check.message ?? 'FAILED'}`);
+          }
+        }
+        const retryContext = errorDetails.join('\n');
+
+        // Identify which task IDs need retry
+        const taskIdsToRetry: string[] = [
+          ...currentFailedInWave,
+          ...currentMergeResult.failed,
+        ];
+        // If only judge failures (all tasks passed), retry all tasks in the wave
+        if (taskIdsToRetry.length === 0 && hasJudgeFailures) {
+          taskIdsToRetry.push(...waveTaskIds);
+        }
+        const uniqueRetryIds = [...new Set(taskIdsToRetry)];
+
+        // Revert wave merges back to baseline
+        await git.reset(['--hard', baselineSha]);
+
+        // Remove previous results for tasks being retried
+        for (const retryId of uniqueRetryIds) {
+          const allIdx = allResults.findIndex((r) => r.taskId === retryId);
+          if (allIdx !== -1) allResults.splice(allIdx, 1);
+          const waveIdx = waveResults.findIndex((r) => r.taskId === retryId);
+          if (waveIdx !== -1) waveResults.splice(waveIdx, 1);
+          const ftIdx = failedTasks.indexOf(retryId);
+          if (ftIdx !== -1) failedTasks.splice(ftIdx, 1);
+        }
+
+        // Re-execute failed tasks
+        const retryLimit = pLimit(config.maxWorkers);
+        const retryResults: WorkerResult[] = [];
+
+        await Promise.all(
+          uniqueRetryIds.map((taskId) =>
+            retryLimit(async () => {
+              const task = taskMap.get(taskId);
+              if (!task) {
+                retryResults.push({
+                  taskId,
+                  success: false,
+                  filesWritten: [],
+                  error: `Task ${taskId} not found in plan`,
+                });
+                return;
+              }
+
+              progress.taskStart(wave.waveNumber, taskId);
+
+              let retryWorktreePath: string | undefined;
+              try {
+                const wt = await worktreeManager.create(taskId);
+                retryWorktreePath = wt.worktreePath;
+
+                const result = await executeTask(task, retryWorktreePath, config, { retryContext });
+                retryResults.push(result);
+
+                if (result.success) {
+                  if (result.usage && options?.costTracker) {
+                    options.costTracker.recordFromResponse(
+                      {
+                        usage: {
+                          input_tokens: result.usage.input_tokens,
+                          output_tokens: result.usage.output_tokens,
+                          cache_creation_input_tokens: result.usage.cache_creation_input_tokens ?? undefined,
+                          cache_read_input_tokens: result.usage.cache_read_input_tokens ?? undefined,
+                        },
+                      },
+                      `worker:${taskId}:retry${retryAttempt}`,
+                      config.model,
+                      wave.waveNumber,
+                    );
+                  }
+                  await worktreeManager.commitInWorktree(
+                    taskId,
+                    `feat(anvil): ${task.description.slice(0, 72)} (retry ${retryAttempt})`,
+                    task.writes,
+                  );
+                  progress.taskComplete(wave.waveNumber, taskId, result.filesWritten.length);
+                } else {
+                  progress.taskFailed(wave.waveNumber, taskId, result.error ?? 'unknown');
+                }
+              } catch (err) {
+                const error = err instanceof Error ? err.message : String(err);
+                retryResults.push({
+                  taskId,
+                  success: false,
+                  filesWritten: [],
+                  error,
+                });
+                progress.taskFailed(wave.waveNumber, taskId, error);
+              }
+            }),
+          ),
+        );
+
+        // Separate retry successes from failures
+        const retrySuccessIds = retryResults
+          .filter((r) => r.success)
+          .map((r) => r.taskId);
+        const retryFailedIds = retryResults
+          .filter((r) => !r.success)
+          .map((r) => r.taskId);
+
+        // Re-merge: originally successful tasks (not retried) + newly successful retries
+        const originalSuccessIds = waveResults
+          .filter((r) => r.success)
+          .map((r) => r.taskId);
+        const allSuccessIds = [...originalSuccessIds, ...retrySuccessIds];
+
+        currentMergeResult = { merged: [] as string[], failed: [] as string[] };
+        if (allSuccessIds.length > 0) {
+          currentMergeResult = await worktreeManager.mergeWaveBranches(allSuccessIds);
+          if (currentMergeResult.failed.length > 0) {
+            for (const failedId of currentMergeResult.failed) {
+              progress.taskFailed(wave.waveNumber, failedId, 'merge failed');
+            }
+          }
+        }
+
+        // Cleanup retry worktrees
+        for (const taskId of uniqueRetryIds) {
+          try {
+            await worktreeManager.cleanup(taskId);
+          } catch {
+            // Best effort cleanup
+          }
+        }
+
+        // Update tracking
+        currentFailedInWave = [...retryFailedIds];
+        waveResults.push(...retryResults);
+        allResults.push(...retryResults);
+        failedTasks.push(...retryFailedIds, ...currentMergeResult.failed);
+
+        // Update wave report
+        const existingReportIdx = waveReports.findIndex((r) => r.waveNumber === wave.waveNumber);
+        const updatedReport: WaveReport = {
+          waveNumber: wave.waveNumber,
+          taskResults: waveResults,
+          merged: currentMergeResult.merged,
+          failed: [...retryFailedIds, ...currentMergeResult.failed],
+        };
+        if (existingReportIdx !== -1) {
+          waveReports[existingReportIdx] = updatedReport;
+        }
+
+        // Re-run Sub-Judges after retry merges
+        judgeReport = await runSubJudges(baseDir, wave.waveNumber, waveTasks, baselineSha);
+        judgeReports.push(judgeReport);
+
+        for (const check of judgeReport.checks) {
+          progress.judgeResult(check);
+        }
+
+        hasTaskFailures = retryFailedIds.length > 0 || currentMergeResult.failed.length > 0;
+        hasJudgeFailures = !judgeReport.allPassed;
+        retriesRemaining--;
+      }
+
+      // If still failing after all retries, halt
       if (hasTaskFailures || hasJudgeFailures) {
         const reasons: string[] = [];
         if (hasTaskFailures) reasons.push('task failures');
@@ -210,7 +390,7 @@ export async function executeInWaves(
         };
       }
 
-      progress.waveComplete(wave.waveNumber, mergeResult.merged.length);
+      progress.waveComplete(wave.waveNumber, currentMergeResult.merged.length);
     }
   } finally {
     process.removeListener('SIGINT', cleanup);
