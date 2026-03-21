@@ -96,7 +96,7 @@ describe('full pipeline integration', { timeout: 30000 }, () => {
 
   const config: AnvilConfig = {
     projectName: 'test-project',
-    model: 'claude-sonnet-4-6-20250520',
+    model: 'claude-sonnet-4-6',
     maxWorkers: 4,
     anvilDir: '.anvil',
   };

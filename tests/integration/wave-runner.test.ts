@@ -48,7 +48,7 @@ function makePlan(tasks: Plan['tasks']): Plan {
 
 const defaultConfig: AnvilConfig = {
   projectName: 'test-project',
-  model: 'claude-sonnet-4-6-20250520',
+  model: 'claude-sonnet-4-6',
   maxWorkers: 4,
   anvilDir: '.anvil',
 };

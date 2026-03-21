@@ -27,7 +27,7 @@ describe('Cost report integration', () => {
       outputTokens: 500,
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
-      model: 'claude-sonnet-4-6-20250520',
+      model: 'claude-sonnet-4-6',
     });
 
     const report = tracker.toCostReport('test-session-1');
@@ -48,12 +48,12 @@ describe('Cost report integration', () => {
       outputTokens: 500,
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
-      model: 'claude-sonnet-4-6-20250520',
+      model: 'claude-sonnet-4-6',
     });
     tracker.recordFromResponse(
       { usage: { input_tokens: 2000, output_tokens: 1000, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } },
       'worker:task-001',
-      'claude-sonnet-4-6-20250520',
+      'claude-sonnet-4-6',
       1,
     );
     tracker.record({
@@ -62,7 +62,7 @@ describe('Cost report integration', () => {
       outputTokens: 400,
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
-      model: 'claude-sonnet-4-6-20250520',
+      model: 'claude-sonnet-4-6',
     });
 
     const report = tracker.toCostReport('test-session-2');
@@ -91,7 +91,7 @@ describe('Cost report integration', () => {
       outputTokens: 500,
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
-      model: 'claude-sonnet-4-6-20250520',
+      model: 'claude-sonnet-4-6',
     });
     tracker.record({
       agent: 'worker',
@@ -99,7 +99,7 @@ describe('Cost report integration', () => {
       outputTokens: 1000,
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
-      model: 'claude-sonnet-4-6-20250520',
+      model: 'claude-sonnet-4-6',
     });
 
     const report = tracker.toCostReport('test-session-3');

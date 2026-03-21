@@ -12,7 +12,7 @@ describe('CostTracker', () => {
       outputTokens: 500,
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
-      model: 'claude-sonnet-4-6-20250520',
+      model: 'claude-sonnet-4-6',
     });
     const report = tracker.toCostReport('test-session');
     expect(report.entries).toHaveLength(1);
@@ -29,7 +29,7 @@ describe('CostTracker', () => {
         cache_read_input_tokens: 300,
       },
     };
-    tracker.recordFromResponse(fakeResponse, 'worker', 'claude-sonnet-4-6-20250520', 1);
+    tracker.recordFromResponse(fakeResponse, 'worker', 'claude-sonnet-4-6', 1);
     const report = tracker.toCostReport('test-session');
     expect(report.entries).toHaveLength(1);
     expect(report.entries[0].inputTokens).toBe(2000);
@@ -46,7 +46,7 @@ describe('CostTracker', () => {
       outputTokens: 1_000_000,
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
-      model: 'claude-sonnet-4-6-20250520',
+      model: 'claude-sonnet-4-6',
     });
     const report = tracker.toCostReport('session-1');
     expect(report.sessionId).toBe('session-1');
@@ -63,7 +63,7 @@ describe('CostTracker', () => {
       outputTokens: 500,
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
-      model: 'claude-sonnet-4-6-20250520',
+      model: 'claude-sonnet-4-6',
       waveNumber: 1,
     });
     tracker.record({
@@ -72,7 +72,7 @@ describe('CostTracker', () => {
       outputTokens: 500,
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
-      model: 'claude-sonnet-4-6-20250520',
+      model: 'claude-sonnet-4-6',
       waveNumber: 2,
     });
     tracker.record({
@@ -81,7 +81,7 @@ describe('CostTracker', () => {
       outputTokens: 1000,
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
-      model: 'claude-sonnet-4-6-20250520',
+      model: 'claude-sonnet-4-6',
       waveNumber: 1,
     });
 
@@ -102,7 +102,7 @@ describe('CostTracker', () => {
       outputTokens: 500,
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
-      model: 'claude-sonnet-4-6-20250520',
+      model: 'claude-sonnet-4-6',
     });
     tracker.record({
       agent: 'worker',
@@ -110,7 +110,7 @@ describe('CostTracker', () => {
       outputTokens: 1000,
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
-      model: 'claude-sonnet-4-6-20250520',
+      model: 'claude-sonnet-4-6',
     });
 
     const sessionCost = tracker.getSessionCost();
@@ -120,13 +120,13 @@ describe('CostTracker', () => {
 });
 
 describe('calculateCost', () => {
-  it('Test 3: returns correct USD for claude-sonnet-4-6-20250520 pricing', () => {
+  it('Test 3: returns correct USD for claude-sonnet-4-6 pricing', () => {
     const cost = calculateCost({
       inputTokens: 1000,
       outputTokens: 1000,
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
-      model: 'claude-sonnet-4-6-20250520',
+      model: 'claude-sonnet-4-6',
     });
     // (1000/1e6)*3 + (1000/1e6)*15 = 0.003 + 0.015 = 0.018
     expect(cost).toBeCloseTo(0.018, 6);

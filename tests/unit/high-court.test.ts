@@ -70,7 +70,7 @@ const makePlan = (): Plan => ({
 
 const makeConfig = (): AnvilConfig => ({
   projectName: 'test-project',
-  model: 'claude-sonnet-4-6-20250520',
+  model: 'claude-sonnet-4-6',
   maxWorkers: 4,
   anvilDir: '.anvil',
 });
@@ -285,7 +285,7 @@ describe('runHighCourt', () => {
     expect(costTracker.recordFromResponse).toHaveBeenCalledWith(
       expect.objectContaining({ parsed_output: report, usage: { input_tokens: 500, output_tokens: 200 } }),
       'high-court',
-      'claude-sonnet-4-6-20250520',
+      'claude-sonnet-4-6',
     );
   });
 

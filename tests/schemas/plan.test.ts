@@ -77,7 +77,7 @@ describe('AnvilConfigSchema', () => {
   it('returns defaults when parsing empty object', () => {
     const config = AnvilConfigSchema.parse({});
     expect(config.projectName).toBe('anvil-project');
-    expect(config.model).toBe('claude-sonnet-4-6-20250520');
+    expect(config.model).toBe('claude-sonnet-4-6');
     expect(config.maxWorkers).toBe(4);
     expect(config.anvilDir).toBe('.anvil');
   });
@@ -99,6 +99,6 @@ describe('AnvilConfigSchema', () => {
     });
     expect(config.projectName).toBe('my-project');
     expect(config.maxWorkers).toBe(8);
-    expect(config.model).toBe('claude-sonnet-4-6-20250520');
+    expect(config.model).toBe('claude-sonnet-4-6');
   });
 });
