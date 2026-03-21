@@ -12,6 +12,11 @@ vi.mock('../../src/workers/worker.js', () => ({
   executeTask: vi.fn(),
 }));
 
+// Mock the Sub-Judge panel
+vi.mock('../../src/judges/sub-judge-panel.js', () => ({
+  runSubJudges: vi.fn(),
+}));
+
 // Mock chalk to avoid ESM import issues in tests
 vi.mock('chalk', () => ({
   default: {
@@ -26,8 +31,11 @@ vi.mock('chalk', () => ({
 }));
 
 import { executeTask } from '../../src/workers/worker.js';
+import { runSubJudges } from '../../src/judges/sub-judge-panel.js';
+import type { SubJudgeReport } from '../../src/schemas/reports.js';
 
 const mockedExecuteTask = vi.mocked(executeTask);
+const mockedRunSubJudges = vi.mocked(runSubJudges);
 
 function makePlan(tasks: Plan['tasks']): Plan {
   return {
@@ -59,6 +67,19 @@ describe('wave-runner integration', { timeout: 30000 }, () => {
     await git.commit('initial commit');
 
     mockedExecuteTask.mockReset();
+    mockedRunSubJudges.mockReset();
+
+    // Default: Sub-Judges pass
+    mockedRunSubJudges.mockImplementation(async (_dir, waveNumber) => ({
+      waveNumber,
+      checks: [
+        { name: 'tsc', passed: true },
+        { name: 'vitest', passed: true },
+        { name: 'touch-map', passed: true },
+      ],
+      allPassed: true,
+      timestamp: new Date().toISOString(),
+    }));
   });
 
   afterEach(async () => {
@@ -198,5 +219,93 @@ describe('wave-runner integration', { timeout: 30000 }, () => {
     expect(badResult?.error).toBe('bad code');
     expect(result.waveReports[0].merged).toContain('good');
     expect(result.waveReports[0].failed).toContain('bad');
+  });
+
+  it('calls runSubJudges after each wave and includes judgeReports in result', async () => {
+    mockedExecuteTask.mockImplementation(async (task, worktreePath) => {
+      await writeFile(join(worktreePath, `${task.id}.ts`), `export const ${task.id} = true;`);
+      return { taskId: task.id, success: true, filesWritten: [`${task.id}.ts`] };
+    });
+
+    const plan = makePlan([
+      { id: 'j-1', description: 'Judge test 1', writes: ['j-1.ts'], reads: [], dependsOn: [], acceptanceCriteria: [] },
+      { id: 'j-2', description: 'Judge test 2', writes: ['j-2.ts'], reads: [], dependsOn: ['j-1'], acceptanceCriteria: [] },
+    ]);
+
+    const result = await executeInWaves(plan, defaultConfig, { baseDir: tempDir });
+
+    expect(result.success).toBe(true);
+    expect(result.judgeReports).toHaveLength(2);
+    expect(result.judgeReports[0].waveNumber).toBe(1);
+    expect(result.judgeReports[1].waveNumber).toBe(2);
+    // runSubJudges was called once per wave
+    expect(mockedRunSubJudges).toHaveBeenCalledTimes(2);
+  });
+
+  it('halts progression when Sub-Judge fails', async () => {
+    mockedExecuteTask.mockImplementation(async (task, worktreePath) => {
+      await writeFile(join(worktreePath, `${task.id}.ts`), `export const ${task.id} = true;`);
+      return { taskId: task.id, success: true, filesWritten: [`${task.id}.ts`] };
+    });
+
+    // Override: Sub-Judge fails on wave 1
+    mockedRunSubJudges.mockImplementation(async (_dir, waveNumber) => ({
+      waveNumber,
+      checks: [
+        { name: 'tsc', passed: true },
+        { name: 'vitest', passed: false, message: 'Tests failed: 2 failures' },
+        { name: 'touch-map', passed: true },
+      ],
+      allPassed: false,
+      timestamp: new Date().toISOString(),
+    }));
+
+    const plan = makePlan([
+      { id: 'jf-1', description: 'Judge fail wave 1', writes: ['jf-1.ts'], reads: [], dependsOn: [], acceptanceCriteria: [] },
+      { id: 'jf-2', description: 'Judge fail wave 2', writes: ['jf-2.ts'], reads: [], dependsOn: ['jf-1'], acceptanceCriteria: [] },
+    ]);
+
+    const result = await executeInWaves(plan, defaultConfig, { baseDir: tempDir });
+
+    expect(result.success).toBe(false);
+    expect(result.haltedAtWave).toBe(1);
+    expect(result.judgeReports).toHaveLength(1);
+    expect(result.judgeReports[0].allPassed).toBe(false);
+    // Wave 2 should NOT have executed
+    expect(result.waveReports).toHaveLength(1);
+    expect(result.results.map((r) => r.taskId)).not.toContain('jf-2');
+  });
+
+  it('reports both task failures and judge failures together', async () => {
+    mockedExecuteTask.mockImplementation(async (task, worktreePath) => {
+      if (task.id === 'both-fail') {
+        return { taskId: task.id, success: false, filesWritten: [], error: 'task error' };
+      }
+      await writeFile(join(worktreePath, `${task.id}.ts`), `// ${task.id}`);
+      return { taskId: task.id, success: true, filesWritten: [`${task.id}.ts`] };
+    });
+
+    // Sub-Judge also fails
+    mockedRunSubJudges.mockImplementation(async (_dir, waveNumber) => ({
+      waveNumber,
+      checks: [
+        { name: 'tsc', passed: false, message: 'Compilation errors' },
+      ],
+      allPassed: false,
+      timestamp: new Date().toISOString(),
+    }));
+
+    const plan = makePlan([
+      { id: 'both-ok', description: 'OK', writes: ['both-ok.ts'], reads: [], dependsOn: [], acceptanceCriteria: [] },
+      { id: 'both-fail', description: 'Fail', writes: ['both-fail.ts'], reads: [], dependsOn: [], acceptanceCriteria: [] },
+    ]);
+
+    const result = await executeInWaves(plan, defaultConfig, { baseDir: tempDir });
+
+    expect(result.success).toBe(false);
+    expect(result.haltedAtWave).toBe(1);
+    // Both task failure and judge failure reported
+    expect(result.failedTasks).toContain('both-fail');
+    expect(result.judgeReports[0].allPassed).toBe(false);
   });
 });

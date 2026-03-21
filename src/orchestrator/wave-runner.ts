@@ -1,10 +1,13 @@
 import type { Plan } from '../schemas/plan.js';
 import type { AnvilConfig } from '../schemas/config.js';
+import type { SubJudgeReport } from '../schemas/reports.js';
 import { WorktreeManager } from '../git/worktree-manager.js';
 import { executeTask, type WorkerResult } from '../workers/worker.js';
 import { topologicalWaves } from '../core/topological-sort.js';
+import { runSubJudges } from '../judges/sub-judge-panel.js';
 import pLimit from 'p-limit';
 import chalk from 'chalk';
+import { simpleGit } from 'simple-git';
 import type Anthropic from '@anthropic-ai/sdk';
 
 export interface WaveReport {
@@ -18,6 +21,7 @@ export interface WaveExecutionResult {
   success: boolean;
   results: WorkerResult[];
   waveReports: WaveReport[];
+  judgeReports: SubJudgeReport[];
   haltedAtWave?: number;
   failedTasks: string[];
 }
@@ -39,8 +43,10 @@ export async function executeInWaves(
 
   const waves = topologicalWaves(plan.tasks);
   const taskMap = new Map(plan.tasks.map((t) => [t.id, t]));
+  const git = simpleGit(baseDir);
   const allResults: WorkerResult[] = [];
   const waveReports: WaveReport[] = [];
+  const judgeReports: SubJudgeReport[] = [];
   const failedTasks: string[] = [];
 
   // Signal handler cleanup
@@ -132,6 +138,9 @@ export async function executeInWaves(
         .filter((r) => !r.success)
         .map((r) => r.taskId);
 
+      // Capture baseline SHA before merges (for Sub-Judge touch-map diffing)
+      const baselineSha = await git.revparse(['HEAD']);
+
       // Batch merge successful task branches
       let mergeResult = { merged: [] as string[], failed: [] as string[] };
       if (successTaskIds.length > 0) {
@@ -165,17 +174,43 @@ export async function executeInWaves(
       allResults.push(...waveResults);
       failedTasks.push(...failedInWave, ...mergeResult.failed);
 
-      // If any task failed, halt progression
-      if (failedInWave.length > 0 || mergeResult.failed.length > 0) {
+      // Run Sub-Judges after wave merge
+      const waveTasks = waveTaskIds
+        .map((id) => taskMap.get(id))
+        .filter((t): t is NonNullable<typeof t> => t != null);
+      const judgeReport = await runSubJudges(baseDir, wave.waveNumber, waveTasks, baselineSha);
+      judgeReports.push(judgeReport);
+
+      // Display judge results
+      for (const check of judgeReport.checks) {
+        if (check.passed) {
+          console.log(chalk.green(`  ✓ Judge: ${check.name} — passed`));
+        } else {
+          console.log(chalk.red(`  ✗ Judge: ${check.name} — FAILED`));
+          if (check.message) {
+            console.log(chalk.red(`    ${check.message}`));
+          }
+        }
+      }
+
+      // If any task failed OR Sub-Judge failed, halt progression
+      const hasTaskFailures = failedInWave.length > 0 || mergeResult.failed.length > 0;
+      const hasJudgeFailures = !judgeReport.allPassed;
+
+      if (hasTaskFailures || hasJudgeFailures) {
+        const reasons: string[] = [];
+        if (hasTaskFailures) reasons.push('task failures');
+        if (hasJudgeFailures) reasons.push('Sub-Judge failures');
         console.log(
           chalk.yellow(
-            `\nWave ${wave.waveNumber} had failures. Halting progression.`,
+            `\nWave ${wave.waveNumber} halted: ${reasons.join(' and ')}`,
           ),
         );
         return {
           success: false,
           results: allResults,
           waveReports,
+          judgeReports,
           haltedAtWave: wave.waveNumber,
           failedTasks,
         };
@@ -183,7 +218,7 @@ export async function executeInWaves(
 
       console.log(
         chalk.green(
-          `  Wave ${wave.waveNumber} complete: ${mergeResult.merged.length} merged`,
+          `  Wave ${wave.waveNumber} complete: ${mergeResult.merged.length} merged, all judges passed`,
         ),
       );
     }
@@ -196,6 +231,7 @@ export async function executeInWaves(
     success: true,
     results: allResults,
     waveReports,
+    judgeReports,
     failedTasks: [],
   };
 }
