@@ -6,10 +6,10 @@ import { executeTask, type WorkerResult } from '../workers/worker.js';
 import { topologicalWaves } from '../core/topological-sort.js';
 import { runSubJudges } from '../judges/sub-judge-panel.js';
 import pLimit from 'p-limit';
-import chalk from 'chalk';
 import { simpleGit } from 'simple-git';
 import type Anthropic from '@anthropic-ai/sdk';
 import type { CostTracker } from '../cost/tracker.js';
+import { ProgressDisplay } from '../ui/progress.js';
 
 export interface WaveReport {
   waveNumber: number;
@@ -36,9 +36,10 @@ export interface WaveExecutionResult {
 export async function executeInWaves(
   plan: Plan,
   config: AnvilConfig,
-  options?: { client?: Anthropic; baseDir?: string; costTracker?: CostTracker },
+  options?: { client?: Anthropic; baseDir?: string; costTracker?: CostTracker; progress?: ProgressDisplay },
 ): Promise<WaveExecutionResult> {
   const baseDir = options?.baseDir ?? process.cwd();
+  const progress = options?.progress ?? new ProgressDisplay();
   const worktreeManager = new WorktreeManager(baseDir);
   await worktreeManager.pruneStale();
 
@@ -61,11 +62,7 @@ export async function executeInWaves(
 
   try {
     for (const wave of waves) {
-      console.log(
-        chalk.cyan(
-          `\n--- Wave ${wave.waveNumber}/${waves.length} (${wave.taskIds.length} tasks) ---`,
-        ),
-      );
+      progress.waveStart(wave.waveNumber, waves.length, wave.taskIds.length);
 
       const limit = pLimit(config.maxWorkers);
       const waveResults: WorkerResult[] = [];
@@ -86,7 +83,7 @@ export async function executeInWaves(
               return;
             }
 
-            console.log(chalk.blue(`  [wave ${wave.waveNumber}] Starting task: ${taskId}`));
+            progress.taskStart(wave.waveNumber, taskId);
 
             let worktreePath: string | undefined;
             try {
@@ -119,17 +116,9 @@ export async function executeInWaves(
                   taskId,
                   `feat(anvil): ${task.description.slice(0, 72)}`,
                 );
-                console.log(
-                  chalk.green(
-                    `  [wave ${wave.waveNumber}] Task ${taskId} complete (${result.filesWritten.length} files)`,
-                  ),
-                );
+                progress.taskComplete(wave.waveNumber, taskId, result.filesWritten.length);
               } else {
-                console.log(
-                  chalk.red(
-                    `  [wave ${wave.waveNumber}] Task ${taskId} failed: ${result.error}`,
-                  ),
-                );
+                progress.taskFailed(wave.waveNumber, taskId, result.error ?? 'unknown');
               }
             } catch (err) {
               const error = err instanceof Error ? err.message : String(err);
@@ -139,9 +128,7 @@ export async function executeInWaves(
                 filesWritten: [],
                 error,
               });
-              console.log(
-                chalk.red(`  [wave ${wave.waveNumber}] Task ${taskId} error: ${error}`),
-              );
+              progress.taskFailed(wave.waveNumber, taskId, error);
             }
           }),
         ),
@@ -163,11 +150,9 @@ export async function executeInWaves(
       if (successTaskIds.length > 0) {
         mergeResult = await worktreeManager.mergeWaveBranches(successTaskIds);
         if (mergeResult.failed.length > 0) {
-          console.log(
-            chalk.red(
-              `  Merge failures: ${mergeResult.failed.join(', ')}`,
-            ),
-          );
+          for (const failedId of mergeResult.failed) {
+            progress.taskFailed(wave.waveNumber, failedId, 'merge failed');
+          }
         }
       }
 
@@ -200,14 +185,7 @@ export async function executeInWaves(
 
       // Display judge results
       for (const check of judgeReport.checks) {
-        if (check.passed) {
-          console.log(chalk.green(`  ✓ Judge: ${check.name} — passed`));
-        } else {
-          console.log(chalk.red(`  ✗ Judge: ${check.name} — FAILED`));
-          if (check.message) {
-            console.log(chalk.red(`    ${check.message}`));
-          }
-        }
+        progress.judgeResult(check);
       }
 
       // If any task failed OR Sub-Judge failed, halt progression
@@ -218,11 +196,7 @@ export async function executeInWaves(
         const reasons: string[] = [];
         if (hasTaskFailures) reasons.push('task failures');
         if (hasJudgeFailures) reasons.push('Sub-Judge failures');
-        console.log(
-          chalk.yellow(
-            `\nWave ${wave.waveNumber} halted: ${reasons.join(' and ')}`,
-          ),
-        );
+        progress.waveHalted(wave.waveNumber, reasons);
         return {
           success: false,
           results: allResults,
@@ -233,11 +207,7 @@ export async function executeInWaves(
         };
       }
 
-      console.log(
-        chalk.green(
-          `  Wave ${wave.waveNumber} complete: ${mergeResult.merged.length} merged, all judges passed`,
-        ),
-      );
+      progress.waveComplete(wave.waveNumber, mergeResult.merged.length);
     }
   } finally {
     process.removeListener('SIGINT', cleanup);
