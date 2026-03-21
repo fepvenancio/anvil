@@ -13,3 +13,5 @@ export {
   validateDependencyRefs,
 } from './core/topological-sort.js';
 export { createLogger } from './core/logger.js';
+export { WorktreeManager, validateTouchMap } from './git/worktree-manager.js';
+export { executeTask, type WorkerResult } from './workers/worker.js';
