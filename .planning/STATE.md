@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-stopped_at: Completed 04-04-PLAN.md
-last_updated: "2026-03-21T04:03:35.650Z"
+stopped_at: Completed 05-01-PLAN.md
+last_updated: "2026-03-21T04:38:36.855Z"
 progress:
   total_phases: 5
   completed_phases: 4
-  total_plans: 13
-  completed_plans: 13
+  total_plans: 15
+  completed_plans: 14
 ---
 
 # Project State
@@ -19,12 +19,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-20)
 
 **Core value:** `npx anvil run "Build X"` produces a complete, reviewed, production-ready project with clean git history and full audit trail -- in under 5 minutes, with zero manual setup.
-**Current focus:** Phase 04 — AI Review and Audit Trail
+**Current focus:** Phase 05 — CLI Polish
 
 ## Current Position
 
-Phase: 5
-Plan: Not started
+Phase: 05 (CLI Polish) — EXECUTING
+Plan: 2 of 2
 
 ## Performance Metrics
 
@@ -59,6 +59,7 @@ Plan: Not started
 | Phase 04 P02 | 3min | 2 tasks | 3 files |
 | Phase 04 P03 | 3min | 2 tasks | 4 files |
 | Phase 04 P04 | 4min | 2 tasks | 7 files |
+| Phase 05 P01 | 3min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -96,6 +97,7 @@ Recent decisions affecting current work:
 - [Phase 04]: Worker returns raw API usage in WorkerResult; null coerced to undefined at wave-runner boundary
 - [Phase 04]: Baseline SHA captured before executeInWaves for accurate rollback scope
 - [Phase 04]: Cost report saved on ALL outcomes (success, abort, wave failure) for auditability
+- [Phase 05]: Exported showStatus/showCost/showLogs functions for testability (Commander action delegates to pure function)
 
 ### Pending Todos
 
@@ -107,6 +109,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-21T03:59:39.030Z
-Stopped at: Completed 04-04-PLAN.md
+Last session: 2026-03-21T04:38:36.854Z
+Stopped at: Completed 05-01-PLAN.md
 Resume file: None

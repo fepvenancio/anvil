@@ -102,7 +102,7 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 05-01-PLAN.md — Status, cost, and logs CLI subcommands with unit tests
+- [x] 05-01-PLAN.md — Status, cost, and logs CLI subcommands with unit tests
 - [ ] 05-02-PLAN.md — Live progress display (ora spinners, color-coded output) and completion summary banner
 
 ## Progress
@@ -116,4 +116,4 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 | 2. Planner and Sequential Execution | 3/4 | Gap closure | - |
 | 3. Parallel Waves and Quality Gates | 0/3 | Planned | - |
 | 4. AI Review and Audit Trail | 4/4 | Complete   | 2026-03-21 |
-| 5. CLI Polish | 0/2 | Planned | - |
+| 5. CLI Polish | 1/2 | In Progress|  |
