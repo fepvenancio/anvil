@@ -13,7 +13,8 @@ const typescript: StackPreset = {
 - Vitest for testing
 - Zod for runtime validation
 - tsconfig.json: strict: true, target: "ES2022", module: "node16", moduleResolution: "node16"
-- package.json: "type": "module"`,
+- package.json: "type": "module"
+- devDependencies MUST include: typescript, vitest, @types/node (CRITICAL — without @types/node, process/Buffer/etc. cause tsc errors)`,
 };
 
 const python: StackPreset = {
