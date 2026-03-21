@@ -32,7 +32,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans**: 2 plans
 
 Plans:
-- [ ] 01-01-PLAN.md -- Project scaffold, Zod schemas, and test infrastructure
+- [x] 01-01-PLAN.md -- Project scaffold, Zod schemas, and test infrastructure
 - [ ] 01-02-PLAN.md -- Core modules (anvil-dir, config-loader, validator, logger) and CLI entry point
 
 ### Phase 2: Planner and Sequential Execution

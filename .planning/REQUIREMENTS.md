@@ -20,9 +20,9 @@ Requirements for initial release. Each maps to roadmap phases.
 - [ ] **PLAN-01**: Planner Station accepts natural-language spec and produces a JSON plan with tasks, touch maps, and dependency graph
 - [ ] **PLAN-02**: Each task in the plan declares `writes[]`, `reads[]`, and `depends_on[]`
 - [ ] **PLAN-03**: Planner rejects plans with overlapping writes between tasks (merges into single task or re-plans)
-- [ ] **PLAN-04**: Plan is validated against a JSON schema before execution begins
+- [x] **PLAN-04**: Plan is validated against a JSON schema before execution begins
 - [ ] **PLAN-05**: Single interactive prompt after plan generation: "Review plan before starting execution? (Y/n/edit)" — 'edit' opens plan JSON in $EDITOR, re-validates on save
-- [ ] **PLAN-06**: Plan is saved to `.anvil/roadmap.json` for inspection
+- [x] **PLAN-06**: Plan is saved to `.anvil/roadmap.json` for inspection
 
 ### Execution
 
@@ -63,7 +63,7 @@ Requirements for initial release. Each maps to roadmap phases.
 - [ ] **CLUX-01**: Live progress display showing current wave, task status, and judge verdicts
 - [ ] **CLUX-02**: Color-coded output: green (passed), yellow (warning), red (failed/escalation)
 - [ ] **CLUX-03**: Build completion summary with next steps (status, cost, git push, ship --pr)
-- [ ] **CLUX-04**: `.anvil/` folder contains full audit trail: plan, wave reports, judge verdicts, cost summary
+- [x] **CLUX-04**: `.anvil/` folder contains full audit trail: plan, wave reports, judge verdicts, cost summary
 
 ## v2 Requirements
 
@@ -124,9 +124,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PLAN-01 | Phase 2 | Pending |
 | PLAN-02 | Phase 2 | Pending |
 | PLAN-03 | Phase 2 | Pending |
-| PLAN-04 | Phase 1 | Pending |
+| PLAN-04 | Phase 1 | Complete |
 | PLAN-05 | Phase 2 | Pending |
-| PLAN-06 | Phase 1 | Pending |
+| PLAN-06 | Phase 1 | Complete |
 | EXEC-01 | Phase 2 | Pending |
 | EXEC-02 | Phase 2 | Pending |
 | EXEC-03 | Phase 2 | Pending |
@@ -152,7 +152,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CLUX-01 | Phase 5 | Pending |
 | CLUX-02 | Phase 5 | Pending |
 | CLUX-03 | Phase 5 | Pending |
-| CLUX-04 | Phase 1 | Pending |
+| CLUX-04 | Phase 1 | Complete |
 
 **Coverage:**
 - v1 requirements: 37 total
