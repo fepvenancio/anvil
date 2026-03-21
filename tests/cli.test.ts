@@ -5,10 +5,9 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 /**
- * Helper to run the CLI. The `run` command now calls generatePlan which
- * requires an API key. Without one, it will print the config summary
- * and initialize .anvil/ before failing on the API call. These smoke
- * tests verify the setup behavior, so we tolerate the API auth error.
+ * Helper to run the CLI. Without ANTHROPIC_API_KEY, the CLI prints
+ * config summary, initializes .anvil/, then exits with an error message.
+ * These smoke tests verify the setup behavior before the API call.
  */
 function runCli(args: string, cwd: string): { stdout: string; stderr: string } {
   const cliPath = join(process.cwd(), 'src', 'cli.ts');
@@ -16,12 +15,11 @@ function runCli(args: string, cwd: string): { stdout: string; stderr: string } {
     const stdout = execSync(`npx tsx "${cliPath}" ${args}`, {
       cwd,
       encoding: 'utf-8',
-      timeout: 15000,
+      timeout: 10000,
+      env: { ...process.env, ANTHROPIC_API_KEY: '' },
     });
     return { stdout, stderr: '' };
   } catch (err: any) {
-    // The CLI may exit non-zero due to missing API key after setup.
-    // Return whatever output was captured.
     return {
       stdout: err.stdout ?? '',
       stderr: err.stderr ?? '',
@@ -41,11 +39,11 @@ describe('CLI smoke test', () => {
   });
 
   it('prints config summary with project name, model, and max workers (CLI-05)', () => {
-    const { stdout } = runCli('run "test build"', tmpDir);
-    expect(stdout).toContain('Project:');
-    expect(stdout).toContain('Model:');
-    expect(stdout).toContain('Max Workers:');
-    expect(stdout).toContain('test build');
+    const { stdout, stderr } = runCli('run "test build"', tmpDir);
+    const output = stdout + stderr;
+    expect(output).toContain('Project:');
+    expect(output).toContain('Model:');
+    expect(output).toContain('Max Workers:');
   });
 
   it('creates .anvil/ with expected structure on run (CLUX-04)', async () => {
@@ -62,5 +60,10 @@ describe('CLI smoke test', () => {
     const content = await readFile(join(tmpDir, '.anvil', 'roadmap.json'), 'utf-8');
     const data = JSON.parse(content);
     expect(data).toHaveProperty('plan');
+  });
+
+  it('exits with error when ANTHROPIC_API_KEY is not set', () => {
+    const { stderr } = runCli('run "test"', tmpDir);
+    expect(stderr).toContain('ANTHROPIC_API_KEY');
   });
 });
