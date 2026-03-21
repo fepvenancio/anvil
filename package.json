@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "description": "Lightweight AI Code Factory — Build anything from a single command. Pure TypeScript, zero setup.",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "bin": {
     "anvil": "dist/cli.js"
