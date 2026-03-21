@@ -1,36 +1,21 @@
-import Anthropic from '@anthropic-ai/sdk';
-import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
+import { query } from '@anthropic-ai/claude-agent-sdk';
 import { HighCourtReportSchema, type HighCourtReport, type SubJudgeReport } from '../schemas/reports.js';
 import type { Plan } from '../schemas/plan.js';
 import type { AnvilConfig } from '../schemas/config.js';
 import { HIGH_COURT_SYSTEM_PROMPT } from '../prompts/high-court-system.js';
 import { simpleGit } from 'simple-git';
 
-/** Optional CostTracker interface to avoid hard dependency on cost module. */
-interface CostTrackerLike {
-  recordFromResponse(
-    response: { usage: { input_tokens: number; output_tokens: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number } },
-    agent: string,
-    model: string,
-    waveNumber?: number,
-  ): void;
-}
-
 export interface RunHighCourtOptions {
-  /** Pre-configured Anthropic client (useful for testing). */
-  client?: Anthropic;
   /** Git SHA to diff against. Defaults to HEAD~1. */
   baselineSha?: string;
-  /** Optional cost tracker for recording token usage. */
-  costTracker?: CostTrackerLike;
 }
 
 /**
- * Runs the High Court architectural review.
+ * Runs the High Court architectural review using Claude Code Agent SDK.
+ * Auth is inherited from the parent CLI environment.
  *
  * Reads the build context (git diff, plan spec, Sub-Judge reports),
- * calls Claude with structured output, and returns a HighCourtReport
- * with a merge/human_required/abort verdict.
+ * calls Claude, and returns a HighCourtReport with a merge/human_required/abort verdict.
  */
 export async function runHighCourt(
   projectDir: string,
@@ -39,7 +24,6 @@ export async function runHighCourt(
   config: AnvilConfig,
   options?: RunHighCourtOptions,
 ): Promise<HighCourtReport> {
-  const client = options?.client ?? new Anthropic();
   const baselineSha = options?.baselineSha ?? 'HEAD~1';
 
   // Get git diff context
@@ -53,11 +37,12 @@ export async function runHighCourt(
     fullDiff = fullDiff.slice(0, MAX_DIFF_CHARS) + '\n\n... [diff truncated at 50000 chars]';
   }
 
-  // Build user message
+  // Build task list
   const taskList = plan.tasks
     .map((t) => `- ${t.id}: ${t.description} (writes: ${t.writes.join(', ')})`)
     .join('\n');
 
+  // Build judge report section
   const judgeSection = judgeReports
     .map((r) => {
       const checks = r.checks
@@ -67,7 +52,7 @@ export async function runHighCourt(
     })
     .join('\n\n');
 
-  const userMessage = `## Original Spec
+  const prompt = `## Original Spec
 ${plan.spec}
 
 ## Tasks
@@ -80,26 +65,54 @@ ${diffStat}
 ${fullDiff}
 
 ## Sub-Judge Reports
-${judgeSection}`;
+${judgeSection}
 
-  // Call Claude with structured output
-  const response = await (client.messages as any).parse({
-    model: config.model,
-    max_tokens: 4096,
-    system: HIGH_COURT_SYSTEM_PROMPT,
-    messages: [{ role: 'user', content: userMessage }],
-    output_config: { format: zodOutputFormat(HighCourtReportSchema) },
+IMPORTANT: Respond with ONLY a valid JSON object matching this exact schema. No markdown, no code fences, no explanation — just the raw JSON.
+
+Schema:
+{
+  "verdict": "merge" | "human_required" | "abort",
+  "reasoning": "string (explanation of verdict)",
+  "concerns": ["string (architectural concerns found)"],
+  "invariantChecks": [
+    {
+      "name": "string (what was checked)",
+      "passed": boolean,
+      "detail": "string (optional explanation)"
+    }
+  ]
+}`;
+
+  const conversation = query({
+    prompt,
+    options: {
+      systemPrompt: HIGH_COURT_SYSTEM_PROMPT,
+      model: config.model,
+      maxTurns: 3,
+      permissionMode: 'bypassPermissions',
+      tools: [],
+    },
   });
 
-  // Record cost if tracker provided
-  options?.costTracker?.recordFromResponse(response, 'high-court', config.model);
-
-  // Extract parsed output
-  const report: HighCourtReport | null | undefined = response.parsed_output;
-
-  if (!report) {
-    throw new Error('High Court produced no output — parsed_output is null');
+  let resultText = '';
+  for await (const message of conversation) {
+    if (message.type === 'result' && message.subtype === 'success') {
+      resultText = message.result;
+    }
   }
 
-  return report;
+  if (!resultText) {
+    throw new Error('High Court produced no output');
+  }
+
+  // Extract JSON from response
+  const jsonMatch = resultText.match(/```(?:json)?\s*([\s\S]*?)```/) ?? [null, resultText];
+  const jsonStr = (jsonMatch[1] ?? resultText).trim();
+
+  const parseResult = HighCourtReportSchema.safeParse(JSON.parse(jsonStr));
+  if (!parseResult.success) {
+    throw new Error(`High Court output failed schema validation: ${parseResult.error.message}`);
+  }
+
+  return parseResult.data;
 }

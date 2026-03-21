@@ -5,18 +5,19 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 /**
- * Helper to run the CLI. Without ANTHROPIC_API_KEY, the CLI prints
- * config summary, initializes .anvil/, then exits with an error message.
- * These smoke tests verify the setup behavior before the API call.
+ * Helper to run the CLI. The Agent SDK's query() tries to spawn Claude Code,
+ * which will fail/hang in CI. We use a short execSync timeout so the process
+ * is killed quickly. The CLI prints the banner and creates .anvil/ BEFORE
+ * the Agent SDK call, so we can still verify setup behavior.
  */
-function runCli(args: string, cwd: string): { stdout: string; stderr: string } {
+function runCli(args: string, cwd: string, timeout = 5000): { stdout: string; stderr: string } {
   const cliPath = join(process.cwd(), 'src', 'cli.ts');
   try {
     const stdout = execSync(`npx tsx "${cliPath}" ${args}`, {
       cwd,
       encoding: 'utf-8',
-      timeout: 10000,
-      env: { ...process.env, ANTHROPIC_API_KEY: '' },
+      timeout,
+      env: { ...process.env, ANTHROPIC_API_KEY: '', NO_COLOR: '1' },
     });
     return { stdout, stderr: '' };
   } catch (err: any) {
@@ -27,7 +28,7 @@ function runCli(args: string, cwd: string): { stdout: string; stderr: string } {
   }
 }
 
-describe('CLI smoke test', () => {
+describe('CLI smoke test', { timeout: 15000 }, () => {
   let tmpDir: string;
 
   beforeEach(async () => {

@@ -1,4 +1,4 @@
-import Anthropic from '@anthropic-ai/sdk';
+import { query } from '@anthropic-ai/claude-agent-sdk';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Plan } from '../schemas/plan.js';
@@ -6,28 +6,9 @@ import type { HighCourtReport } from '../schemas/reports.js';
 import type { AnvilConfig } from '../schemas/config.js';
 import { LIBRARIAN_SYSTEM_PROMPT } from '../prompts/librarian-system.js';
 
-/** Optional CostTracker interface to avoid hard dependency on cost module. */
-interface CostTrackerLike {
-  recordFromResponse(
-    response: { usage: { input_tokens: number; output_tokens: number; cache_creation_input_tokens?: number | null; cache_read_input_tokens?: number | null } },
-    agent: string,
-    model: string,
-    waveNumber?: number,
-  ): void;
-}
-
-export interface RunLibrarianOptions {
-  /** Pre-configured Anthropic client (useful for testing). */
-  client?: Anthropic;
-  /** Optional cost tracker for recording token usage. */
-  costTracker?: CostTrackerLike;
-}
-
 /**
- * Generates README.md and ARCHITECTURE.md for the project using AI.
- *
- * Gathers project context (file tree, package.json, High Court report, plan spec),
- * calls Claude twice (once per document), writes the results to projectDir.
+ * Generates README.md and ARCHITECTURE.md for the project using Claude Code Agent SDK.
+ * Auth is inherited from the parent CLI environment.
  *
  * Does NOT commit — that is handled by the CLI orchestrator.
  */
@@ -36,29 +17,22 @@ export async function runLibrarian(
   plan: Plan,
   highCourtReport: HighCourtReport,
   config: AnvilConfig,
-  options?: RunLibrarianOptions,
 ): Promise<{ readmePath: string; architecturePath: string }> {
-  const client = options?.client ?? new Anthropic();
-
-  // Gather context: file tree
+  // Gather context
   const fileTree = await buildFileTree(projectDir);
-
-  // Read package.json if it exists
   let packageJsonContent = '';
   try {
     packageJsonContent = await readFile(join(projectDir, 'package.json'), 'utf-8');
   } catch {
-    // No package.json — that's fine
+    // No package.json
   }
 
-  // Build task descriptions
   const taskDescriptions = plan.tasks
     .map((t) => `- ${t.id}: ${t.description} (writes: ${t.writes.join(', ')})`)
     .join('\n');
 
   // ── README generation ──
-
-  const readmeUserMessage = `Generate a README.md for this project.
+  const readmePrompt = `Generate a README.md for this project. Return ONLY the markdown content, no code fences.
 
 ## Project Name
 ${config.projectName}
@@ -80,26 +54,33 @@ ${highCourtReport.concerns.length > 0 ? `Concerns: ${highCourtReport.concerns.jo
 ## Tasks Completed
 ${taskDescriptions}`;
 
-  const readmeResponse = await client.messages.create({
-    model: config.model,
-    max_tokens: 4096,
-    system: LIBRARIAN_SYSTEM_PROMPT,
-    messages: [{ role: 'user', content: readmeUserMessage }],
+  const readmeConv = query({
+    prompt: readmePrompt,
+    options: {
+      systemPrompt: LIBRARIAN_SYSTEM_PROMPT,
+      model: config.model,
+      maxTurns: 2,
+      permissionMode: 'bypassPermissions',
+      tools: [],
+    },
   });
 
-  options?.costTracker?.recordFromResponse(readmeResponse, 'librarian', config.model);
+  let readmeContent = '';
+  for await (const message of readmeConv) {
+    if (message.type === 'result' && message.subtype === 'success') {
+      readmeContent = message.result;
+    }
+  }
 
-  const readmeContent = extractText(readmeResponse);
   const readmePath = join(projectDir, 'README.md');
   await writeFile(readmePath, readmeContent);
 
   // ── ARCHITECTURE generation ──
-
   const invariantSection = highCourtReport.invariantChecks
     .map((c) => `- ${c.name}: ${c.passed ? 'PASSED' : 'FAILED'}${c.detail ? ` — ${c.detail}` : ''}`)
     .join('\n');
 
-  const archUserMessage = `Generate an ARCHITECTURE.md for this project.
+  const archPrompt = `Generate an ARCHITECTURE.md for this project. Return ONLY the markdown content, no code fences.
 
 ## File Tree
 ${fileTree}
@@ -113,16 +94,24 @@ ${invariantSection}
 ## High Court Reasoning
 ${highCourtReport.reasoning}`;
 
-  const archResponse = await client.messages.create({
-    model: config.model,
-    max_tokens: 4096,
-    system: LIBRARIAN_SYSTEM_PROMPT,
-    messages: [{ role: 'user', content: archUserMessage }],
+  const archConv = query({
+    prompt: archPrompt,
+    options: {
+      systemPrompt: LIBRARIAN_SYSTEM_PROMPT,
+      model: config.model,
+      maxTurns: 2,
+      permissionMode: 'bypassPermissions',
+      tools: [],
+    },
   });
 
-  options?.costTracker?.recordFromResponse(archResponse, 'librarian', config.model);
+  let archContent = '';
+  for await (const message of archConv) {
+    if (message.type === 'result' && message.subtype === 'success') {
+      archContent = message.result;
+    }
+  }
 
-  const archContent = extractText(archResponse);
   const architecturePath = join(projectDir, 'ARCHITECTURE.md');
   await writeFile(architecturePath, archContent);
 
@@ -154,14 +143,4 @@ async function buildFileTree(dir: string, prefix = ''): Promise<string> {
   }
 
   return lines.join('\n');
-}
-
-/**
- * Extract text content from an Anthropic messages response.
- */
-function extractText(response: Anthropic.Messages.Message | { content: Array<{ type: string; text?: string }> }): string {
-  return (response.content as Array<{ type: string; text?: string }>)
-    .filter((block) => block.type === 'text' && block.text)
-    .map((block) => block.text!)
-    .join('\n');
 }

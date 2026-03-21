@@ -1,7 +1,12 @@
-import { describe, it, expect, vi } from 'vitest';
-import { generatePlan } from '../../src/stations/planner.js';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { AnvilConfig } from '../../src/schemas/config.js';
 import type { Plan } from '../../src/schemas/plan.js';
+
+// Mock the Agent SDK at module level
+const mockQuery = vi.fn();
+vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
+  query: mockQuery,
+}));
 
 const config: AnvilConfig = {
   projectName: 'test-project',
@@ -63,62 +68,108 @@ function makeOverlappingPlan(): Plan {
   };
 }
 
-function makeMockClient(parseFn: ReturnType<typeof vi.fn>) {
-  return {
-    messages: { parse: parseFn },
-  } as any;
+/** Helper: configure mockQuery to return an async generator yielding a result with the given data. */
+function setQueryResult(data: any) {
+  mockQuery.mockReturnValue(
+    (async function* () {
+      yield {
+        type: 'result',
+        subtype: 'success',
+        result: JSON.stringify(data),
+        duration_ms: 100,
+        total_cost_usd: 0.01,
+        usage: { input_tokens: 100, output_tokens: 200 },
+      };
+    })(),
+  );
+}
+
+/** Helper: configure mockQuery to return different results on successive calls. */
+function setQueryResults(...dataItems: any[]) {
+  let callIndex = 0;
+  mockQuery.mockImplementation(() =>
+    (async function* () {
+      const data = dataItems[callIndex++];
+      yield {
+        type: 'result',
+        subtype: 'success',
+        result: JSON.stringify(data),
+        duration_ms: 100,
+        total_cost_usd: 0.01,
+        usage: { input_tokens: 100, output_tokens: 200 },
+      };
+    })(),
+  );
+}
+
+/** Helper: configure mockQuery to return an async generator with no result message. */
+function setQueryEmpty() {
+  mockQuery.mockReturnValue(
+    (async function* () {
+      // yield nothing — no result message
+    })(),
+  );
 }
 
 describe('generatePlan', () => {
+  beforeEach(() => {
+    mockQuery.mockReset();
+  });
+
   it('generates a valid plan from spec', async () => {
     const plan = makePlan();
-    const parseFn = vi.fn().mockResolvedValue({ parsed_output: plan });
-    const client = makeMockClient(parseFn);
+    setQueryResult(plan);
 
-    const result = await generatePlan('Build a REST API', config, { client });
+    const { generatePlan } = await import('../../src/stations/planner.js');
+    const result = await generatePlan('Build a REST API', config);
 
     expect(result.id).toBe(plan.id);
     expect(result.tasks).toHaveLength(2);
     expect(result.tasks[0].writes).toContain('src/server.ts');
     expect(result.tasks[1].dependsOn).toContain('task-001');
-    expect(parseFn).toHaveBeenCalledOnce();
+    expect(mockQuery).toHaveBeenCalledOnce();
   });
 
   it('retries on write overlap then succeeds', async () => {
     const overlapping = makeOverlappingPlan();
     const clean = makePlan();
-    const parseFn = vi
-      .fn()
-      .mockResolvedValueOnce({ parsed_output: overlapping })
-      .mockResolvedValueOnce({ parsed_output: clean });
-    const client = makeMockClient(parseFn);
+    setQueryResults(overlapping, clean);
 
-    const result = await generatePlan('Build something', config, { client });
+    const { generatePlan } = await import('../../src/stations/planner.js');
+    const result = await generatePlan('Build something', config);
 
-    expect(parseFn).toHaveBeenCalledTimes(2);
+    expect(mockQuery).toHaveBeenCalledTimes(2);
     expect(result.id).toBe(clean.id);
   });
 
   it('throws after max retries on persistent overlap', async () => {
     const overlapping = makeOverlappingPlan();
-    const parseFn = vi
-      .fn()
-      .mockResolvedValue({ parsed_output: overlapping });
-    const client = makeMockClient(parseFn);
+    // Return overlapping plan every time
+    mockQuery.mockImplementation(() =>
+      (async function* () {
+        yield {
+          type: 'result',
+          subtype: 'success',
+          result: JSON.stringify(overlapping),
+          duration_ms: 100,
+          total_cost_usd: 0.01,
+          usage: { input_tokens: 100, output_tokens: 200 },
+        };
+      })(),
+    );
 
+    const { generatePlan } = await import('../../src/stations/planner.js');
     await expect(
-      generatePlan('Build something', config, { client, maxRetries: 3 }),
+      generatePlan('Build something', config, { maxRetries: 3 }),
     ).rejects.toThrow('Planner failed to resolve write overlaps after 3 attempts');
   });
 
-  it('throws on null parsed_output', async () => {
-    const parseFn = vi
-      .fn()
-      .mockResolvedValue({ parsed_output: null });
-    const client = makeMockClient(parseFn);
+  it('throws when query produces no output', async () => {
+    setQueryEmpty();
 
+    const { generatePlan } = await import('../../src/stations/planner.js');
     await expect(
-      generatePlan('Build something', config, { client }),
+      generatePlan('Build something', config),
     ).rejects.toThrow('Planner produced no output');
   });
 
@@ -135,13 +186,11 @@ describe('generatePlan', () => {
         },
       ],
     });
-    const parseFn = vi
-      .fn()
-      .mockResolvedValue({ parsed_output: badPlan });
-    const client = makeMockClient(parseFn);
+    setQueryResult(badPlan);
 
+    const { generatePlan } = await import('../../src/stations/planner.js');
     await expect(
-      generatePlan('Build something', config, { client }),
+      generatePlan('Build something', config),
     ).rejects.toThrow('Invalid dependency references');
   });
 });

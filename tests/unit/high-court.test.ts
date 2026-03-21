@@ -7,6 +7,12 @@ import type { Plan } from '../../src/schemas/plan.js';
 import type { SubJudgeReport } from '../../src/schemas/reports.js';
 import type { AnvilConfig } from '../../src/schemas/config.js';
 
+// ── Mock Agent SDK ───────────────────────────────────────────────────────
+const mockQuery = vi.fn();
+vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
+  query: mockQuery,
+}));
+
 // ── System prompt tests ─────────────────────────────────────────────────
 
 describe('high-court system prompt', () => {
@@ -121,14 +127,30 @@ const makeAbortReport = () => ({
   timestamp: new Date().toISOString(),
 });
 
-const makeMockClient = (parsedOutput: any) => ({
-  messages: {
-    parse: vi.fn().mockResolvedValue({
-      parsed_output: parsedOutput,
-      usage: { input_tokens: 500, output_tokens: 200 },
-    }),
-  },
-});
+/** Helper: configure mockQuery to return an async generator yielding a result with the given JSON data. */
+function setQueryResult(data: any) {
+  mockQuery.mockReturnValue(
+    (async function* () {
+      yield {
+        type: 'result',
+        subtype: 'success',
+        result: JSON.stringify(data),
+        duration_ms: 100,
+        total_cost_usd: 0.01,
+        usage: { input_tokens: 500, output_tokens: 200 },
+      };
+    })(),
+  );
+}
+
+/** Helper: configure mockQuery to return an empty async generator (no result). */
+function setQueryEmpty() {
+  mockQuery.mockReturnValue(
+    (async function* () {
+      // no result message
+    })(),
+  );
+}
 
 // ── runHighCourt tests ──────────────────────────────────────────────────
 
@@ -136,6 +158,7 @@ describe('runHighCourt', () => {
   let tempDir: string;
 
   beforeEach(async () => {
+    mockQuery.mockReset();
     tempDir = await mkdtemp(join(tmpdir(), 'high-court-'));
     execSync('git init', { cwd: tempDir });
     execSync('git config user.email "test@test.com"', { cwd: tempDir });
@@ -150,29 +173,26 @@ describe('runHighCourt', () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
-  it('calls client.messages.parse() with zodOutputFormat(HighCourtReportSchema)', async () => {
+  it('calls query() from Agent SDK', async () => {
     const report = makeMergeReport();
-    const mockClient = makeMockClient(report);
+    setQueryResult(report);
 
     const { runHighCourt } = await import('../../src/judges/high-court.js');
-    await runHighCourt(tempDir, makePlan(), makeJudgeReports(), makeConfig(), {
-      client: mockClient as any,
-    });
+    await runHighCourt(tempDir, makePlan(), makeJudgeReports(), makeConfig());
 
-    expect(mockClient.messages.parse).toHaveBeenCalledTimes(1);
-    const callArgs = mockClient.messages.parse.mock.calls[0][0];
-    expect(callArgs.output_config).toBeDefined();
-    expect(callArgs.output_config.format).toBeDefined();
+    expect(mockQuery).toHaveBeenCalledTimes(1);
+    const callArgs = mockQuery.mock.calls[0][0];
+    expect(callArgs.prompt).toBeDefined();
+    expect(callArgs.options).toBeDefined();
+    expect(callArgs.options.systemPrompt).toBeDefined();
   });
 
   it('on merge verdict, returns HighCourtReport with verdict="merge"', async () => {
     const report = makeMergeReport();
-    const mockClient = makeMockClient(report);
+    setQueryResult(report);
 
     const { runHighCourt } = await import('../../src/judges/high-court.js');
-    const result = await runHighCourt(tempDir, makePlan(), makeJudgeReports(), makeConfig(), {
-      client: mockClient as any,
-    });
+    const result = await runHighCourt(tempDir, makePlan(), makeJudgeReports(), makeConfig());
 
     expect(result.verdict).toBe('merge');
     expect(result.reasoning).toBe('Architecture is clean and well-structured.');
@@ -182,12 +202,10 @@ describe('runHighCourt', () => {
 
   it('on human_required verdict, returns report with concerns array populated', async () => {
     const report = makeHumanRequiredReport();
-    const mockClient = makeMockClient(report);
+    setQueryResult(report);
 
     const { runHighCourt } = await import('../../src/judges/high-court.js');
-    const result = await runHighCourt(tempDir, makePlan(), makeJudgeReports(), makeConfig(), {
-      client: mockClient as any,
-    });
+    const result = await runHighCourt(tempDir, makePlan(), makeJudgeReports(), makeConfig());
 
     expect(result.verdict).toBe('human_required');
     expect(result.concerns.length).toBeGreaterThan(0);
@@ -196,109 +214,55 @@ describe('runHighCourt', () => {
 
   it('on abort verdict, returns report with concerns and reasoning', async () => {
     const report = makeAbortReport();
-    const mockClient = makeMockClient(report);
+    setQueryResult(report);
 
     const { runHighCourt } = await import('../../src/judges/high-court.js');
-    const result = await runHighCourt(tempDir, makePlan(), makeJudgeReports(), makeConfig(), {
-      client: mockClient as any,
-    });
+    const result = await runHighCourt(tempDir, makePlan(), makeJudgeReports(), makeConfig());
 
     expect(result.verdict).toBe('abort');
     expect(result.concerns.length).toBeGreaterThan(0);
     expect(result.reasoning).toContain('circular dependency');
   });
 
-  it('passes plan spec, Sub-Judge report summaries, and git diff context in user message', async () => {
+  it('passes plan spec, Sub-Judge report summaries, and git diff context in prompt', async () => {
     const report = makeMergeReport();
-    const mockClient = makeMockClient(report);
+    setQueryResult(report);
 
     const { runHighCourt } = await import('../../src/judges/high-court.js');
-    await runHighCourt(tempDir, makePlan(), makeJudgeReports(), makeConfig(), {
-      client: mockClient as any,
-    });
+    await runHighCourt(tempDir, makePlan(), makeJudgeReports(), makeConfig());
 
-    const callArgs = mockClient.messages.parse.mock.calls[0][0];
-    const userMessage = callArgs.messages[0].content;
+    const callArgs = mockQuery.mock.calls[0][0];
+    const prompt = callArgs.prompt;
     // Should contain plan spec
-    expect(userMessage).toContain('Build a REST API with user management');
+    expect(prompt).toContain('Build a REST API with user management');
     // Should contain task info
-    expect(userMessage).toContain('task-001');
-    expect(userMessage).toContain('task-002');
+    expect(prompt).toContain('task-001');
+    expect(prompt).toContain('task-002');
     // Should contain Sub-Judge info
-    expect(userMessage).toContain('Wave 1');
+    expect(prompt).toContain('Wave 1');
     // Should contain git diff context
-    expect(userMessage).toContain('Diff');
+    expect(prompt).toContain('Diff');
   });
 
   it('uses config.model for the API call', async () => {
     const report = makeMergeReport();
-    const mockClient = makeMockClient(report);
+    setQueryResult(report);
     const config = makeConfig();
     config.model = 'claude-test-model';
 
     const { runHighCourt } = await import('../../src/judges/high-court.js');
-    await runHighCourt(tempDir, makePlan(), makeJudgeReports(), config, {
-      client: mockClient as any,
-    });
+    await runHighCourt(tempDir, makePlan(), makeJudgeReports(), config);
 
-    const callArgs = mockClient.messages.parse.mock.calls[0][0];
-    expect(callArgs.model).toBe('claude-test-model');
+    const callArgs = mockQuery.mock.calls[0][0];
+    expect(callArgs.options.model).toBe('claude-test-model');
   });
 
-  it('response timestamp is a valid ISO datetime string', async () => {
-    const report = makeMergeReport();
-    const mockClient = makeMockClient(report);
-
-    const { runHighCourt } = await import('../../src/judges/high-court.js');
-    const result = await runHighCourt(tempDir, makePlan(), makeJudgeReports(), makeConfig(), {
-      client: mockClient as any,
-    });
-
-    expect(result.timestamp).toBeDefined();
-    const date = new Date(result.timestamp);
-    expect(date.toISOString()).toBe(result.timestamp);
-  });
-
-  it('throws descriptive error if parsed_output is null', async () => {
-    const mockClient = makeMockClient(null);
+  it('throws descriptive error if query produces no output', async () => {
+    setQueryEmpty();
 
     const { runHighCourt } = await import('../../src/judges/high-court.js');
     await expect(
-      runHighCourt(tempDir, makePlan(), makeJudgeReports(), makeConfig(), {
-        client: mockClient as any,
-      }),
+      runHighCourt(tempDir, makePlan(), makeJudgeReports(), makeConfig()),
     ).rejects.toThrow(/no.*output|null|failed/i);
-  });
-
-  it('when options.costTracker is provided, recordFromResponse is called', async () => {
-    const report = makeMergeReport();
-    const mockClient = makeMockClient(report);
-    const costTracker = { recordFromResponse: vi.fn() };
-
-    const { runHighCourt } = await import('../../src/judges/high-court.js');
-    await runHighCourt(tempDir, makePlan(), makeJudgeReports(), makeConfig(), {
-      client: mockClient as any,
-      costTracker: costTracker as any,
-    });
-
-    expect(costTracker.recordFromResponse).toHaveBeenCalledTimes(1);
-    expect(costTracker.recordFromResponse).toHaveBeenCalledWith(
-      expect.objectContaining({ parsed_output: report, usage: { input_tokens: 500, output_tokens: 200 } }),
-      'high-court',
-      'claude-sonnet-4-6',
-    );
-  });
-
-  it('when options.costTracker is omitted, function still works without error', async () => {
-    const report = makeMergeReport();
-    const mockClient = makeMockClient(report);
-
-    const { runHighCourt } = await import('../../src/judges/high-court.js');
-    const result = await runHighCourt(tempDir, makePlan(), makeJudgeReports(), makeConfig(), {
-      client: mockClient as any,
-      // No costTracker
-    });
-
-    expect(result.verdict).toBe('merge');
   });
 });

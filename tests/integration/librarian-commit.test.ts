@@ -1,10 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtemp, rm, writeFile, readFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import simpleGit from 'simple-git';
-import { vi } from 'vitest';
-import { runLibrarian } from '../../src/stations/librarian.js';
 import type { Plan } from '../../src/schemas/plan.js';
 import type { HighCourtReport } from '../../src/schemas/reports.js';
 import type { AnvilConfig } from '../../src/schemas/config.js';
@@ -12,23 +10,27 @@ import type { AnvilConfig } from '../../src/schemas/config.js';
 const MOCK_README = '# My Project\n\nA test project built with Anvil.';
 const MOCK_ARCH = '# Architecture\n\n## Overview\n\nLayered architecture with clear module boundaries.';
 
-function mockClient() {
-  const responses = [
-    {
-      content: [{ type: 'text', text: MOCK_README }],
-      usage: { input_tokens: 100, output_tokens: 200 },
-    },
-    {
-      content: [{ type: 'text', text: MOCK_ARCH }],
-      usage: { input_tokens: 150, output_tokens: 250 },
-    },
-  ];
+// ── Mock Agent SDK ───────────────────────────────────────────────────────
+const mockQuery = vi.fn();
+vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
+  query: mockQuery,
+}));
+
+function setQueryTexts(readmeText = MOCK_README, archText = MOCK_ARCH) {
   let callIndex = 0;
-  return {
-    messages: {
-      create: vi.fn().mockImplementation(() => Promise.resolve(responses[callIndex++])),
-    },
-  } as any;
+  const texts = [readmeText, archText];
+  mockQuery.mockImplementation(() =>
+    (async function* () {
+      yield {
+        type: 'result',
+        subtype: 'success',
+        result: texts[callIndex++],
+        duration_ms: 100,
+        total_cost_usd: 0.01,
+        usage: { input_tokens: 100, output_tokens: 200 },
+      };
+    })(),
+  );
 }
 
 const plan: Plan = {
@@ -69,6 +71,7 @@ describe('Librarian atomic commit integration', { timeout: 15000 }, () => {
   let tempDir: string;
 
   beforeEach(async () => {
+    mockQuery.mockReset();
     tempDir = await mkdtemp(join(tmpdir(), 'librarian-int-'));
     const git = simpleGit(tempDir);
     await git.init();
@@ -87,8 +90,9 @@ describe('Librarian atomic commit integration', { timeout: 15000 }, () => {
   });
 
   it('README.md and ARCHITECTURE.md exist on disk after runLibrarian', async () => {
-    const client = mockClient();
-    await runLibrarian(tempDir, plan, report, config, { client });
+    setQueryTexts();
+    const { runLibrarian } = await import('../../src/stations/librarian.js');
+    await runLibrarian(tempDir, plan, report, config);
 
     const readme = await readFile(join(tempDir, 'README.md'), 'utf-8');
     const arch = await readFile(join(tempDir, 'ARCHITECTURE.md'), 'utf-8');
@@ -98,8 +102,9 @@ describe('Librarian atomic commit integration', { timeout: 15000 }, () => {
   });
 
   it('generated docs can be committed as atomic git commits', async () => {
-    const client = mockClient();
-    await runLibrarian(tempDir, plan, report, config, { client });
+    setQueryTexts();
+    const { runLibrarian } = await import('../../src/stations/librarian.js');
+    await runLibrarian(tempDir, plan, report, config);
 
     const git = simpleGit(tempDir);
     await git.add(['README.md', 'ARCHITECTURE.md']);
@@ -111,8 +116,9 @@ describe('Librarian atomic commit integration', { timeout: 15000 }, () => {
   });
 
   it('git log shows the doc commit with descriptive message', async () => {
-    const client = mockClient();
-    await runLibrarian(tempDir, plan, report, config, { client });
+    setQueryTexts();
+    const { runLibrarian } = await import('../../src/stations/librarian.js');
+    await runLibrarian(tempDir, plan, report, config);
 
     const git = simpleGit(tempDir);
     await git.add(['README.md', 'ARCHITECTURE.md']);

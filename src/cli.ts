@@ -114,7 +114,7 @@ program
         console.log(chalk.blue('\nRunning High Court architectural review...\n'));
         const highCourtReport = await runHighCourt(
           baseDir, reviewedPlan, result.judgeReports, config,
-          { baselineSha, costTracker },
+          { baselineSha },
         );
 
         // Save High Court report
@@ -139,7 +139,6 @@ program
           console.log(chalk.blue('\nGenerating documentation...\n'));
           const docs = await runLibrarian(
             baseDir, reviewedPlan, highCourtReport, config,
-            { costTracker },
           );
 
           // LIBR-03: Atomic commit for generated docs

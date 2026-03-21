@@ -1,5 +1,4 @@
-import Anthropic from '@anthropic-ai/sdk';
-import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
+import { query } from '@anthropic-ai/claude-agent-sdk';
 import { PlanSchema, type Plan } from '../schemas/plan.js';
 import type { AnvilConfig } from '../schemas/config.js';
 import { detectWriteOverlaps } from '../core/validator.js';
@@ -7,15 +6,15 @@ import { validateDependencyRefs } from '../core/topological-sort.js';
 import { PLANNER_SYSTEM_PROMPT } from '../prompts/planner-system.js';
 
 export interface GeneratePlanOptions {
-  /** Provide a pre-configured Anthropic client (useful for testing). */
-  client?: Anthropic;
   /** Maximum number of re-plan attempts on write overlap. Default: 3. */
   maxRetries?: number;
+  /** Pre-parsed plan for testing (skips AI call). */
+  mockPlan?: Plan;
 }
 
 /**
- * Generates a validated plan from a natural-language spec using Claude
- * with structured outputs (zodOutputFormat + PlanSchema).
+ * Generates a validated plan from a natural-language spec using Claude Code Agent SDK.
+ * Auth is inherited from the parent CLI environment (Claude Code, etc.).
  *
  * Retries up to maxRetries times if the LLM produces overlapping writes.
  * Throws on persistent overlaps or invalid dependency references.
@@ -25,45 +24,84 @@ export async function generatePlan(
   config: AnvilConfig,
   options?: GeneratePlanOptions,
 ): Promise<Plan> {
-  const client = options?.client ?? new Anthropic();
-  const maxRetries = options?.maxRetries ?? 3;
+  // Testing shortcut
+  if (options?.mockPlan) return options.mockPlan;
 
-  return _generateWithRetry(client, config, spec, [], maxRetries);
+  const maxRetries = options?.maxRetries ?? 3;
+  return _generateWithRetry(config, spec, '', maxRetries);
 }
 
 async function _generateWithRetry(
-  client: Anthropic,
   config: AnvilConfig,
   spec: string,
-  extraMessages: Array<{ role: 'user' | 'assistant'; content: string }>,
+  feedbackHistory: string,
   retriesRemaining: number,
 ): Promise<Plan> {
-  const messages: Array<{ role: 'user' | 'assistant'; content: string }> = [
-    { role: 'user', content: spec },
-    ...extraMessages,
-  ];
+  const prompt = `${spec}${feedbackHistory ? `\n\n## Previous Feedback\n${feedbackHistory}` : ''}
 
-  const response = await (client.messages as any).parse({
-    model: config.model,
-    max_tokens: 16384,
-    system: PLANNER_SYSTEM_PROMPT,
-    messages,
-    output_config: { format: zodOutputFormat(PlanSchema) },
+IMPORTANT: Respond with ONLY a valid JSON object matching this exact schema. No markdown, no code fences, no explanation — just the raw JSON.
+
+Schema:
+{
+  "id": "string (uuid format)",
+  "spec": "string (the original spec)",
+  "createdAt": "string (ISO date)",
+  "tasks": [
+    {
+      "id": "string (task-001 format)",
+      "description": "string",
+      "writes": ["string (file paths this task creates/modifies)"],
+      "reads": ["string (file paths this task reads for context)"],
+      "dependsOn": ["string (task IDs that must complete before this one)"],
+      "acceptanceCriteria": ["string (testable conditions)"]
+    }
+  ]
+}
+
+Rules:
+- Each task's writes[] must NOT overlap with any other task's writes[]
+- dependsOn must reference valid task IDs
+- Order tasks so dependencies come first`;
+
+  const conversation = query({
+    prompt,
+    options: {
+      systemPrompt: PLANNER_SYSTEM_PROMPT,
+      model: config.model,
+      maxTurns: 3,
+      permissionMode: 'bypassPermissions',
+      tools: [],  // Planner doesn't need tools — just generates JSON
+    },
   });
 
-  const plan: Plan | null | undefined = response.parsed_output;
+  let resultText = '';
+  for await (const message of conversation) {
+    if (message.type === 'result' && message.subtype === 'success') {
+      resultText = message.result;
+    }
+  }
 
-  if (!plan) {
+  if (!resultText) {
     throw new Error('Planner produced no output');
   }
+
+  // Extract JSON from response (may be wrapped in markdown code fences)
+  const jsonMatch = resultText.match(/```(?:json)?\s*([\s\S]*?)```/) ?? [null, resultText];
+  const jsonStr = (jsonMatch[1] ?? resultText).trim();
+
+  // Parse and validate with Zod
+  const parseResult = PlanSchema.safeParse(JSON.parse(jsonStr));
+  if (!parseResult.success) {
+    throw new Error(`Planner output failed schema validation: ${parseResult.error.message}`);
+  }
+
+  const plan = parseResult.data;
 
   // Check for write overlaps
   const overlaps = detectWriteOverlaps(plan.tasks);
   if (overlaps.length > 0) {
     if (retriesRemaining <= 0) {
-      throw new Error(
-        'Planner failed to resolve write overlaps after 3 attempts',
-      );
+      throw new Error('Planner failed to resolve write overlaps after 3 attempts');
     }
 
     const overlapDesc = overlaps
@@ -73,24 +111,9 @@ async function _generateWithRetry(
       )
       .join('\n');
 
-    const feedback = `Your plan has write overlaps that must be fixed:\n${overlapDesc}\nPlease regenerate the plan with no overlapping writes.`;
+    const feedback = `${feedbackHistory}\n\nYour plan has write overlaps that must be fixed:\n${overlapDesc}\nPlease regenerate the plan with no overlapping writes.`;
 
-    // We need to include the assistant's response and the user's feedback
-    return _generateWithRetry(
-      client,
-      config,
-      spec,
-      [
-        ...extraMessages,
-        // Simulate the assistant having responded (the LLM output)
-        {
-          role: 'assistant' as const,
-          content: JSON.stringify(plan),
-        },
-        { role: 'user' as const, content: feedback },
-      ],
-      retriesRemaining - 1,
-    );
+    return _generateWithRetry(config, spec, feedback, retriesRemaining - 1);
   }
 
   // Check for invalid dependency references
