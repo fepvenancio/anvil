@@ -29,11 +29,11 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. All core Zod schemas (Plan, Task, Wave, SessionState, SubJudgeReport, HighCourtReport, CostReport) exist and validate sample data
   3. The `.anvil/` folder is created on run with the expected structure (roadmap.json placeholder, logs/, reports/)
   4. Plan validation rejects malformed JSON and accepts well-formed plans against the schema
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 01-01: TBD
-- [ ] 01-02: TBD
+- [ ] 01-01-PLAN.md -- Project scaffold, Zod schemas, and test infrastructure
+- [ ] 01-02-PLAN.md -- Core modules (anvil-dir, config-loader, validator, logger) and CLI entry point
 
 ### Phase 2: Planner and Sequential Execution
 **Goal**: A user can provide a natural-language spec and get a validated plan with tasks, then watch a single Worker execute each task sequentially in git worktrees with atomic commits
@@ -110,7 +110,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation | 0/? | Not started | - |
+| 1. Foundation | 0/2 | Planning complete | - |
 | 2. Planner and Sequential Execution | 0/? | Not started | - |
 | 3. Parallel Waves and Quality Gates | 0/? | Not started | - |
 | 4. AI Review and Audit Trail | 0/? | Not started | - |
