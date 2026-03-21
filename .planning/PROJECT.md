@@ -14,7 +14,10 @@ Target user: solo devs who loved Forge's power but hated the 40GB RAM / Docker /
 
 ### Validated
 
-(None yet — ship to validate)
+- ✓ CLI skeleton with `run` command entry point — Phase 1
+- ✓ Core Zod schemas (Plan, Task, Wave, Session, Reports, Config) — Phase 1
+- ✓ Plan validation against schema (accepts/rejects correctly) — Phase 1
+- ✓ `.anvil/` directory initialization with audit structure — Phase 1
 
 ### Active
 
@@ -108,4 +111,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-03-20 after initialization*
+*Last updated: 2026-03-21 after Phase 1 completion*
