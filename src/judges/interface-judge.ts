@@ -47,7 +47,11 @@ export async function runInterfaceCheck(
 
     // Check each planned export exists in the actual output
     for (const planned of task.exports) {
-      if (!allActualExports.has(planned.name)) {
+      const found = allActualExports.has(planned.name)
+        // Treat "export default" as matching the single planned export name
+        // (common pattern: plan says "app", worker does "export default app")
+        || (allActualExports.has('default') && task.exports.length === 1);
+      if (!found) {
         mismatches.push(
           `${task.id}: should export "${planned.name}" but doesn't. Actual: [${[...allActualExports].join(', ')}]`,
         );
