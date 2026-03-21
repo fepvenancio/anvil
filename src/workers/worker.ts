@@ -11,6 +11,12 @@ export interface WorkerResult {
   success: boolean;
   filesWritten: string[];
   error?: string;
+  usage?: {
+    input_tokens: number;
+    output_tokens: number;
+    cache_creation_input_tokens?: number | null;
+    cache_read_input_tokens?: number | null;
+  };
 }
 
 export async function executeTask(
@@ -74,6 +80,7 @@ export async function executeTask(
       taskId: task.id,
       success: false,
       filesWritten,
+      usage: response.usage,
       error: `Touch map violation: files modified outside writes[]: ${touchResult.violations.join(', ')}`,
     };
   }
@@ -82,5 +89,6 @@ export async function executeTask(
     taskId: task.id,
     success: true,
     filesWritten,
+    usage: response.usage,
   };
 }

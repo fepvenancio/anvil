@@ -9,6 +9,7 @@ import pLimit from 'p-limit';
 import chalk from 'chalk';
 import { simpleGit } from 'simple-git';
 import type Anthropic from '@anthropic-ai/sdk';
+import type { CostTracker } from '../cost/tracker.js';
 
 export interface WaveReport {
   waveNumber: number;
@@ -35,7 +36,7 @@ export interface WaveExecutionResult {
 export async function executeInWaves(
   plan: Plan,
   config: AnvilConfig,
-  options?: { client?: Anthropic; baseDir?: string },
+  options?: { client?: Anthropic; baseDir?: string; costTracker?: CostTracker },
 ): Promise<WaveExecutionResult> {
   const baseDir = options?.baseDir ?? process.cwd();
   const worktreeManager = new WorktreeManager(baseDir);
@@ -98,6 +99,22 @@ export async function executeInWaves(
               waveResults.push(result);
 
               if (result.success) {
+                // Record worker cost if tracker provided
+                if (result.usage && options?.costTracker) {
+                  options.costTracker.recordFromResponse(
+                    {
+                      usage: {
+                        input_tokens: result.usage.input_tokens,
+                        output_tokens: result.usage.output_tokens,
+                        cache_creation_input_tokens: result.usage.cache_creation_input_tokens ?? undefined,
+                        cache_read_input_tokens: result.usage.cache_read_input_tokens ?? undefined,
+                      },
+                    },
+                    `worker:${taskId}`,
+                    config.model,
+                    wave.waveNumber,
+                  );
+                }
                 await worktreeManager.commitInWorktree(
                   taskId,
                   `feat(anvil): ${task.description.slice(0, 72)}`,
