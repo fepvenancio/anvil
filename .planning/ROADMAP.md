@@ -85,7 +85,7 @@ Plans:
 
 Plans:
 - [x] 04-01-PLAN.md — Cost tracking infrastructure: CostTracker, pricing table, CostEntry schema update
-- [ ] 04-02-PLAN.md — High Court AI architectural review with structured verdicts
+- [x] 04-02-PLAN.md — High Court AI architectural review with structured verdicts
 - [ ] 04-03-PLAN.md — Librarian documentation generation (README + ARCHITECTURE) with atomic commits
 - [ ] 04-04-PLAN.md — Pipeline wiring: CLI integration, rollback, cost display and reporting
 
