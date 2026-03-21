@@ -6,7 +6,7 @@ export interface ModelPricing {
 }
 
 export const MODEL_PRICING: Record<string, ModelPricing> = {
-  'claude-sonnet-4-20250514': {
+  'claude-sonnet-4-6-20250520': {
     inputPerMTok: 3,
     outputPerMTok: 15,
     cacheWritePerMTok: 3.75,
@@ -20,7 +20,7 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
   },
 };
 
-const DEFAULT_MODEL = 'claude-sonnet-4-20250514';
+const DEFAULT_MODEL = 'claude-sonnet-4-6-20250520';
 
 export function calculateCost(usage: {
   inputTokens: number;

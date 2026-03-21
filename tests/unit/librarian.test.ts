@@ -55,7 +55,7 @@ const report: HighCourtReport = {
 
 const config: AnvilConfig = {
   projectName: 'test-project',
-  model: 'claude-sonnet-4-20250514',
+  model: 'claude-sonnet-4-6-20250520',
   maxWorkers: 4,
   anvilDir: '.anvil',
 };
