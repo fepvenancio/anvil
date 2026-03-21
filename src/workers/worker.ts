@@ -73,28 +73,18 @@ export async function executeTask(
       };
     }
 
-    // Validate touch map — did the agent only modify declared files?
+    // Check touch map — report extra files but don't block
+    // Claude Code agents are creative and may create helpful extra files.
+    // The Sub-Judge touch-map check is the real enforcement layer.
     const touchResult = await validateTouchMap(worktreePath, task.writes);
-    if (!touchResult.valid) {
-      return {
-        taskId: task.id,
-        success: false,
-        filesWritten: task.writes,
-        error: `Touch map violation: files modified outside writes[]: ${touchResult.violations.join(', ')}`,
-        costUsd: resultMessage.total_cost_usd,
-        usage: resultMessage.usage ? {
-          input_tokens: resultMessage.usage.input_tokens ?? 0,
-          output_tokens: resultMessage.usage.output_tokens ?? 0,
-          cache_creation_input_tokens: resultMessage.usage.cache_creation_input_tokens,
-          cache_read_input_tokens: resultMessage.usage.cache_read_input_tokens,
-        } : undefined,
-      };
-    }
+    const actualFiles = touchResult.valid
+      ? task.writes
+      : [...task.writes, ...touchResult.violations];
 
     return {
       taskId: task.id,
       success: true,
-      filesWritten: task.writes,
+      filesWritten: actualFiles,
       costUsd: resultMessage.total_cost_usd,
       usage: resultMessage.usage ? {
         input_tokens: resultMessage.usage.input_tokens ?? 0,
