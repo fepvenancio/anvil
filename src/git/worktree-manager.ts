@@ -137,6 +137,25 @@ export class WorktreeManager {
   }
 }
 
+// Files commonly generated as side effects (npm install, build tools, etc.)
+// These are NOT intentional writes and should be ignored by touch-map validation.
+const IGNORED_PATTERNS = [
+  'package-lock.json',
+  'node_modules/',
+  '.gitignore',
+  'yarn.lock',
+  'pnpm-lock.yaml',
+  'bun.lockb',
+  'tsconfig.tsbuildinfo',
+  '.DS_Store',
+];
+
+function isIgnoredFile(file: string): boolean {
+  return IGNORED_PATTERNS.some((pattern) =>
+    pattern.endsWith('/') ? file.startsWith(pattern) : file === pattern,
+  );
+}
+
 export async function validateTouchMap(
   worktreePath: string,
   writes: string[],
@@ -148,6 +167,6 @@ export async function validateTouchMap(
     (f) => f.length > 0,
   );
   const writesSet = new Set(writes);
-  const violations = allChanged.filter((f) => !writesSet.has(f));
+  const violations = allChanged.filter((f) => !writesSet.has(f) && !isIgnoredFile(f));
   return { valid: violations.length === 0, violations };
 }
