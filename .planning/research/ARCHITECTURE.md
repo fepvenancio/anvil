@@ -1,380 +1,592 @@
-# Architecture Patterns
+# Architecture Patterns: Configurable Agent Backends
 
-**Domain:** AI agent orchestration CLI (code generation factory)
-**Researched:** 2026-03-20
+**Domain:** AI agent orchestration with pluggable execution backends
+**Researched:** 2026-03-21
+**Supplements:** Original ARCHITECTURE.md (2026-03-20) -- this document covers the v1.1 Agent Backend milestone specifically.
 
 ## Recommended Architecture
 
-Anvil follows a **pipeline-of-stations** architecture with wave-based parallel execution. The system is a CLI process that spawns no servers -- it runs as a single long-lived Node.js process that orchestrates sub-processes (git operations, Anthropic API calls) and writes state to disk.
+The adapter pattern inserts a thin abstraction layer between the wave-runner/sequential-runner orchestrators and the concrete AI execution mechanism. The current `executeTask()` function in `src/workers/worker.ts` becomes one of two adapter implementations behind a common `AgentAdapter` interface.
 
-```
-User CLI Command
-       |
-       v
-  [Orchestrator]  <-- central event loop, owns all state transitions
-       |
-       +---> [Planner Station]  --> produces Plan (task DAG)
-       |
-       +---> [Wave Scheduler]   --> topological sort, groups tasks into waves
-       |
-       +---> [Worker Pool]      --> parallel Workers in git worktrees (1 per task)
-       |         |
-       |         +---> [Worker 1] (worktree: .anvil/worktrees/task-001/)
-       |         +---> [Worker 2] (worktree: .anvil/worktrees/task-002/)
-       |         +---> [Worker N] (worktree: .anvil/worktrees/task-00N/)
-       |
-       +---> [Merge Engine]     --> merges completed worktree branches into main
-       |
-       +---> [Sub-Judge Panel]  --> mechanical checks (tsc, lint, test, touch map)
-       |
-       +---> [High Court]       --> AI-powered architectural review (once at end)
-       |
-       +---> [Librarian]        --> doc generation from build artifacts
-       |
-       +---> [Cost Auditor]     --> token/cost tracking across all agents
-       |
-       v
-  .anvil/ folder with audit trail, cost report, generated docs
-```
+### Key Design Insight: Two Fundamentally Different Execution Models
+
+The SDK adapter and the Claude Code adapter are not just "different ways to call Claude." They represent two fundamentally different execution models:
+
+| Concern | SDK Adapter | Claude Code Adapter |
+|---------|-------------|---------------------|
+| **File I/O** | Anvil reads files, injects into prompt, parses tool_use blocks, writes files itself | Claude Code reads/writes files directly in the worktree via its own tools |
+| **Iteration** | Single-shot: one API call, parse response | Multi-turn: Claude Code runs tests, reads errors, retries autonomously |
+| **Touch map enforcement** | Post-hoc validation via `validateTouchMap()` | Pre-configured via `--allowedTools` restricting Write/Edit to declared paths, PLUS post-hoc validation |
+| **Error recovery** | None (report_error tool) | Built-in (Claude Code retries on failure) |
+| **Cost tracking** | Token counts from `response.usage` | `total_cost_usd` and `usage` from `SDKResultMessage` |
+| **Git behavior** | Anvil commits after task | Claude Code must NOT commit (Anvil owns git) |
+
+This asymmetry means the adapter interface must be minimal -- it cannot assume either model.
 
 ### Component Boundaries
 
-| Component | Responsibility | Communicates With | I/O |
-|-----------|---------------|-------------------|-----|
-| **CLI** | Parse commands, display progress, handle signals | Orchestrator | stdin/stdout/stderr |
-| **Orchestrator** | State machine driving the pipeline; owns session state | All components | Reads/writes `.anvil/state.json` |
-| **Planner Station** | Analyze user spec, produce task DAG with touch maps | Orchestrator, Anthropic API | Receives spec string, returns `Plan` JSON |
-| **Wave Scheduler** | Topological sort of task DAG into execution waves | Orchestrator | Receives Plan, returns `Wave[]` |
-| **Worker Pool** | Manage concurrent Worker lifecycles (spawn, monitor, collect) | Orchestrator, Workers | Manages concurrency limit (default 4) |
-| **Worker** | Execute a single task in an isolated git worktree | Worker Pool, Anthropic API, git | Reads task spec, writes code + atomic commits |
-| **Worktree Manager** | Create, list, merge, and clean up git worktrees | Worker Pool, Merge Engine | Wraps `simple-git` raw worktree commands |
-| **Merge Engine** | Merge completed worktree branches back to main branch | Orchestrator, Worktree Manager | Operates after each wave completes |
-| **Sub-Judge Panel** | Run mechanical checks in parallel after each wave merge | Orchestrator | Receives merged codebase, returns `SubJudgeReport[]` |
-| **High Court** | AI-powered architectural review at end of all waves | Orchestrator, Anthropic API | Reads handoffs + code (if escalated), returns verdict |
-| **Librarian** | Generate docs (README, ARCHITECTURE, OpenAPI) | Orchestrator | Reads final codebase, writes doc files |
-| **Cost Auditor** | Track tokens/costs per agent per wave | All API-calling components | Accumulates usage data, writes cost report |
-| **Human Escalation** | Handle PLAN_AMBIGUOUS and PLAN_GAP halts | Orchestrator, CLI | Pauses pipeline, prompts user, resumes |
-
-### Data Flow
-
-**Phase 1: Planning**
 ```
-User spec (string)
-  --> Orchestrator
-  --> Planner Station (Anthropic API call)
-  --> Plan { tasks[], touchMaps, dependencyGraph }
-  --> Wave Scheduler (Kahn's algorithm)
-  --> Wave[] (ordered groups of parallelizable tasks)
+cli.ts
+  |
+  +---> config (--agent flag) ---> resolveAdapter()
+  |
+  +---> planner.ts (always SDK -- needs structured output via zodOutputFormat)
+  |
+  +---> wave-runner.ts / sequential-runner.ts
+          |
+          +---> WorktreeManager.create(taskId) --> worktreePath
+          |
+          +---> adapter.execute(task, worktreePath, config) --> AdapterResult
+          |
+          +---> validateTouchMap(worktreePath, task.writes)  [defense-in-depth]
+          |
+          +---> costTracker.recordFromAdapter(result.usage)
+          |
+          +---> WorktreeManager.commitInWorktree(taskId, msg)
 ```
 
-**Phase 2: Execution (per wave)**
-```
-Wave N tasks
-  --> Worker Pool spawns Workers (up to concurrency limit)
-  --> Each Worker:
-      1. Worktree Manager creates worktree + branch
-      2. Worker reads task spec (writes[], reads[], acceptance_criteria)
-      3. Worker calls Anthropic API to generate code
-      4. Touch map enforcement: only declared files writable
-      5. Atomic commit(s) in worktree branch
-      6. Worker produces Handoff { summary, filesChanged, concerns }
-  --> All Workers in wave complete
-  --> Merge Engine merges all wave branches into main
-  --> Sub-Judge Panel runs checks on merged main:
-      - TypeScript compilation (tsc --noEmit)
-      - Lint (if configured)
-      - Test runner (if tests exist)
-      - Touch map compliance (diff against declared writes)
-      - Security scan (optional)
-  --> Sub-Judge Reports collected
-  --> If any FAIL: Orchestrator decides retry/abort/escalate
-  --> Wave N+1 begins from updated main
-```
+| Component | Responsibility | Communicates With |
+|-----------|---------------|-------------------|
+| `AgentAdapter` (interface) | Define execution contract | wave-runner, sequential-runner |
+| `SdkAdapter` | Execute tasks via raw Anthropic SDK (current behavior extracted from worker.ts) | Anthropic SDK, filesystem |
+| `ClaudeCodeAdapter` | Execute tasks via `@anthropic-ai/claude-agent-sdk` `query()` | Agent SDK subprocess, worktree filesystem |
+| `resolveAdapter()` | Factory: config string -> adapter instance | Config, adapter constructors |
+| `AgentCapabilities` | Declare what an adapter can do (data object, not methods) | Planner (for task generation) |
+| Updated `AnvilConfig` | Carry `agent` field | CLI, all adapters |
 
-**Phase 3: Review**
-```
-All waves complete
-  --> High Court receives:
-      - All Worker Handoffs (summaries first, not code)
-      - Sub-Judge Reports from each wave
-      - Project spec for reference
-  --> High Court verdict: MERGE | HUMAN_REQUIRED | ABORT
-  --> If MERGE: proceed to Librarian
-  --> If HUMAN_REQUIRED: pause, show concerns, await human input
-```
-
-**Phase 4: Finalization**
-```
-Librarian generates docs from final codebase
-Cost Auditor writes session summary
-Orchestrator writes final state to .anvil/
-CLI reports completion
-```
-
-## Patterns to Follow
-
-### Pattern 1: Station Pattern (Command + Handler)
-
-Each "station" (Planner, Worker, Sub-Judge, High Court, Librarian) is a self-contained module with a uniform interface. This makes the pipeline composable and testable.
-
-**What:** Every station implements a common interface: receive typed input, produce typed output, report cost.
-**When:** Every agent role in the system.
-**Why:** Testable in isolation. The Orchestrator doesn't need to know station internals.
+## Adapter Interface Contract
 
 ```typescript
-interface Station<TInput, TOutput> {
-  name: string;
-  execute(input: TInput, context: SessionContext): Promise<StationResult<TOutput>>;
+// src/adapters/types.ts
+
+import type { Task } from '../schemas/plan.js';
+import type { AnvilConfig } from '../schemas/config.js';
+
+export interface AdapterUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  costUsd?: number;          // Claude Code provides this directly
+  model: string;
 }
 
-interface StationResult<T> {
-  output: T;
-  usage: TokenUsage;      // for Cost Auditor
-  handoff?: Handoff;       // optional summary for downstream
-  escalation?: Escalation; // PLAN_AMBIGUOUS or PLAN_GAP
+export interface AdapterResult {
+  taskId: string;
+  success: boolean;
+  filesWritten: string[];
+  error?: string;
+  usage: AdapterUsage;
+}
+
+export interface AgentCapabilities {
+  /** Agent can read files from the worktree on its own */
+  canReadFiles: boolean;
+  /** Agent can iterate (run tests, fix errors, retry) */
+  canIterate: boolean;
+  /** Agent can execute shell commands */
+  canRunCommands: boolean;
+  /** Agent can explore the codebase beyond declared reads[] */
+  canExploreCodebase: boolean;
+}
+
+export interface AgentAdapter {
+  /** Human-readable name for logging */
+  readonly name: string;
+
+  /** What this adapter can do -- informs the Planner */
+  readonly capabilities: AgentCapabilities;
+
+  /**
+   * Execute a single task in the given worktree directory.
+   *
+   * Contract:
+   * - Adapter MUST write files to worktreePath
+   * - Adapter MUST NOT make git commits
+   * - Adapter MUST NOT modify files outside task.writes[]
+   * - Adapter MUST return token usage for cost tracking
+   * - Adapter SHOULD respect task.acceptanceCriteria
+   */
+  execute(
+    task: Task,
+    worktreePath: string,
+    config: AnvilConfig,
+  ): Promise<AdapterResult>;
 }
 ```
 
-### Pattern 2: Immutable State Snapshots
+**Confidence: HIGH** -- This interface is derived directly from the existing `WorkerResult` type and `executeTask()` signature in the codebase. The contract preserves all invariants the orchestrators depend on.
 
-**What:** Session state is append-only. Each state transition creates a new snapshot written to `.anvil/state.json`. Previous states are preserved in `.anvil/history/`.
-**When:** Every orchestrator state transition.
-**Why:** Enables resume after crash, full audit trail, debugging. Prevents partial-state corruption.
+## SDK Adapter Implementation
+
+Refactored from existing `src/workers/worker.ts`. The logic is identical -- only the wrapping changes.
 
 ```typescript
-interface SessionState {
-  id: string;
-  status: 'planning' | 'executing' | 'reviewing' | 'finalizing' | 'complete' | 'failed' | 'paused';
-  currentWave: number;
-  plan: Plan | null;
-  waves: WaveState[];
-  judgments: SubJudgeReport[];
-  verdict: HighCourtVerdict | null;
-  cost: CostSummary;
-  timestamp: string;
+// src/adapters/sdk-adapter.ts
+
+export class SdkAdapter implements AgentAdapter {
+  readonly name = 'sdk';
+  readonly capabilities: AgentCapabilities = {
+    canReadFiles: false,      // Anvil injects file contents into prompt
+    canIterate: false,        // Single API call, no retry loop
+    canRunCommands: false,    // No shell access
+    canExploreCodebase: false,
+  };
+
+  private client: Anthropic;
+
+  constructor(client?: Anthropic) {
+    this.client = client ?? new Anthropic();
+  }
+
+  async execute(task: Task, worktreePath: string, config: AnvilConfig): Promise<AdapterResult> {
+    // Move existing executeTask() body here verbatim:
+    // 1. Build user message with task details + read context
+    // 2. Call client.messages.create() with WORKER_SYSTEM_PROMPT + WORKER_TOOLS
+    // 3. Parse tool_use blocks (write_file, report_error)
+    // 4. Write files to worktreePath
+    // 5. Return AdapterResult with usage from response.usage
+  }
 }
 ```
 
-### Pattern 3: Worktree Lifecycle Management
+## Claude Code Adapter Implementation
 
-**What:** Git worktrees are created at task start and cleaned up after merge. Each gets a deterministic branch name.
-**When:** Worker Pool creates worktrees for each wave's tasks.
-**Why:** Isolation without Docker overhead. Deterministic naming enables resume.
+Uses `@anthropic-ai/claude-agent-sdk` TypeScript package. The `query()` function spawns a Claude Code subprocess with full tool access, constrained to the worktree.
 
 ```typescript
-// Worktree lifecycle per task:
-// 1. CREATE: git worktree add .anvil/worktrees/task-{id} -b anvil/task-{id}
-// 2. WORK:   Worker operates in worktree directory
-// 3. COMMIT: Atomic commits in worktree branch
-// 4. MERGE:  git merge anvil/task-{id} (into main, after wave completes)
-// 5. CLEAN:  git worktree remove .anvil/worktrees/task-{id}
+// src/adapters/claude-code-adapter.ts
 
-// simple-git does NOT have native worktree methods.
-// Use git.raw() for all worktree operations:
-await git.raw(['worktree', 'add', worktreePath, '-b', branchName]);
-await git.raw(['worktree', 'remove', worktreePath]);
-```
+import { query } from '@anthropic-ai/claude-agent-sdk';
+import type { AgentAdapter, AdapterResult, AgentCapabilities } from './types.js';
+import type { Task } from '../schemas/plan.js';
+import type { AnvilConfig } from '../schemas/config.js';
 
-### Pattern 4: Wave-Based Topological Execution
+const CLAUDE_CODE_WORKER_PROMPT = `You are a Worker for Anvil, an AI code factory.
+You receive a single task and must implement it exactly as specified.
 
-**What:** Kahn's algorithm groups tasks into waves. Tasks in the same wave have no inter-dependencies and execute in parallel. Waves execute sequentially.
-**When:** After Planner produces the dependency graph.
-**Why:** Eliminates merge conflicts by construction. Simpler than real-time conflict detection.
+RULES:
+1. Only create or modify files listed in the task's writes[] array.
+2. Read the context files listed in reads[] before starting.
+3. Follow the task description precisely -- do not expand scope.
+4. Run relevant tests or type checks to verify your work before finishing.
+5. If the task is ambiguous or impossible, explain why in your final response.
+6. Do NOT make git commits -- Anvil manages git.`;
 
-```typescript
-function scheduleWaves(tasks: Task[]): Wave[] {
-  // Kahn's algorithm variant:
-  // 1. Compute in-degree for each task
-  // 2. Wave 0 = all tasks with in-degree 0
-  // 3. Remove Wave 0 tasks, decrement dependents' in-degrees
-  // 4. Wave 1 = new zero in-degree tasks
-  // 5. Repeat until all tasks scheduled
-  // 6. If tasks remain with non-zero in-degree: cycle detected (error)
+export class ClaudeCodeAdapter implements AgentAdapter {
+  readonly name = 'claude-code';
+  readonly capabilities: AgentCapabilities = {
+    canReadFiles: true,
+    canIterate: true,
+    canRunCommands: true,
+    canExploreCodebase: true,
+  };
+
+  async execute(task: Task, worktreePath: string, config: AnvilConfig): Promise<AdapterResult> {
+    const prompt = this.buildPrompt(task);
+
+    const conversation = query({
+      prompt,
+      options: {
+        cwd: worktreePath,
+        systemPrompt: CLAUDE_CODE_WORKER_PROMPT,
+        model: config.model,
+        allowedTools: this.buildAllowedTools(task),
+        disallowedTools: ['Bash(git *)'],
+        permissionMode: 'bypassPermissions',
+        allowDangerouslySkipPermissions: true,
+        maxTurns: 25,
+        maxBudgetUsd: 2.00,
+        persistSession: false,
+      },
+    });
+
+    let finalResult: AdapterResult | undefined;
+
+    for await (const message of conversation) {
+      if (message.type === 'result') {
+        const usage = {
+          inputTokens: message.usage.input_tokens,
+          outputTokens: message.usage.output_tokens,
+          cacheReadTokens: message.usage.cache_read_input_tokens ?? 0,
+          cacheWriteTokens: message.usage.cache_creation_input_tokens ?? 0,
+          costUsd: message.total_cost_usd,
+          model: config.model,
+        };
+
+        if (message.subtype === 'success') {
+          finalResult = {
+            taskId: task.id,
+            success: true,
+            filesWritten: task.writes,
+            usage,
+          };
+        } else {
+          finalResult = {
+            taskId: task.id,
+            success: false,
+            filesWritten: [],
+            error: ('errors' in message ? message.errors?.join('; ') : message.subtype) ?? 'unknown',
+            usage,
+          };
+        }
+      }
+    }
+
+    return finalResult ?? {
+      taskId: task.id,
+      success: false,
+      filesWritten: [],
+      error: 'No result message received from Claude Code',
+      usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, model: config.model },
+    };
+  }
+
+  private buildAllowedTools(task: Task): string[] {
+    const tools = ['Read', 'Glob', 'Grep'];
+    for (const file of task.writes) {
+      tools.push(`Write(${file})`);
+      tools.push(`Edit(${file})`);
+    }
+    // Allow Bash for tests/linting but not git
+    tools.push('Bash(npm *)');
+    tools.push('Bash(npx *)');
+    tools.push('Bash(node *)');
+    tools.push('Bash(cat *)');
+    tools.push('Bash(ls *)');
+    return tools;
+  }
+
+  private buildPrompt(task: Task): string {
+    // Leaner than SDK prompt -- Claude Code can read files itself
+    return [
+      `## Task: ${task.description}`,
+      ``,
+      `### Files to create/modify:`,
+      ...task.writes.map(f => `- ${f}`),
+      ``,
+      `### Files to read for context:`,
+      ...task.reads.map(f => `- ${f}`),
+      ``,
+      `### Acceptance Criteria:`,
+      ...task.acceptanceCriteria.map(c => `- ${c}`),
+      ``,
+      `Read the context files first, then implement. Run any relevant tests to verify your work.`,
+    ].join('\n');
+  }
 }
 ```
 
-### Pattern 5: Touch Map Enforcement
+**Confidence: HIGH** -- The `query()` API, Options type, and SDKResultMessage structure are documented in the official [Agent SDK TypeScript Reference](https://platform.claude.com/docs/en/agent-sdk/typescript). Key fields verified: `cwd`, `systemPrompt`, `allowedTools`, `disallowedTools`, `permissionMode`, `maxTurns`, `maxBudgetUsd`, `persistSession`, and result message `usage`/`total_cost_usd`.
 
-**What:** Each task declares which files it may write (`writes[]`) and read (`reads[]`). The Planner guarantees no overlapping writes within a wave. Workers are prevented from writing undeclared files.
-**When:** Before and after Worker execution.
-**Why:** Prevents accidental conflicts. Makes merges deterministic. Core Forge principle.
+## Adapter Factory
 
 ```typescript
-interface Task {
-  id: string;
-  description: string;
-  writes: string[];        // files this task may create/modify
-  reads: string[];         // files this task may read (but not modify)
-  dependsOn: string[];     // task IDs that must complete first
-  acceptanceCriteria: string[];
+// src/adapters/index.ts
+
+import type { AgentAdapter } from './types.js';
+import { SdkAdapter } from './sdk-adapter.js';
+import { ClaudeCodeAdapter } from './claude-code-adapter.js';
+import type Anthropic from '@anthropic-ai/sdk';
+
+export type AgentBackend = 'claude-code' | 'sdk';
+
+export function resolveAdapter(backend: AgentBackend, client?: Anthropic): AgentAdapter {
+  switch (backend) {
+    case 'claude-code':
+      return new ClaudeCodeAdapter();
+    case 'sdk':
+      return new SdkAdapter(client);
+    default:
+      throw new Error(`Unknown agent backend: ${backend}. Use 'claude-code' or 'sdk'.`);
+  }
+}
+
+export type { AgentAdapter, AdapterResult, AdapterUsage, AgentCapabilities } from './types.js';
+```
+
+## Integration Points with Existing Code
+
+### 1. Config Schema Change (`src/schemas/config.ts`)
+
+```typescript
+export const AnvilConfigSchema = z.object({
+  projectName: z.string().default('anvil-project'),
+  model: z.string().default('claude-sonnet-4-20250514'),
+  maxWorkers: z.number().int().min(1).max(16).default(4),
+  anvilDir: z.string().default('.anvil'),
+  agent: z.enum(['claude-code', 'sdk']).default('claude-code'),  // NEW
+});
+```
+
+### 2. CLI Flag Addition (`src/cli.ts`)
+
+```typescript
+.option('-a, --agent <backend>', 'Agent backend: claude-code (default) or sdk', 'claude-code')
+```
+
+The `loadConfig()` function in `src/core/config-loader.ts` will need to pass through the `agent` option.
+
+### 3. Wave Runner Changes (`src/orchestrator/wave-runner.ts`)
+
+Current call site (line 93):
+```typescript
+const result = await executeTask(task, worktreePath, config, {
+  client: options?.client,
+});
+```
+
+New call site:
+```typescript
+const result = await adapter.execute(task, worktreePath, config);
+```
+
+The `executeInWaves` function signature gains an `adapter` option:
+```typescript
+export async function executeInWaves(
+  plan: Plan,
+  config: AnvilConfig,
+  options?: {
+    adapter?: AgentAdapter;    // NEW
+    costTracker?: CostTracker;
+    progress?: ProgressDisplay;
+    baseDir?: string;
+  },
+): Promise<WaveExecutionResult> {
+  const adapter = options?.adapter ?? resolveAdapter(config.agent);
+  // ...
 }
 ```
 
-### Pattern 6: Handoff-First Review
+**Critical:** The `validateTouchMap()` call (line 77 in current worker.ts) moves OUT of the worker and INTO the orchestrator, running AFTER `adapter.execute()` returns. This ensures touch map validation is adapter-agnostic.
 
-**What:** High Court reads Worker summaries (handoffs) first, only diving into code when summaries raise concerns. Sub-Judges handle mechanical verification.
-**When:** End of build.
-**Why:** Cheaper and faster. Most issues are caught by Sub-Judges mechanically. High Court adds architectural judgment.
+### 4. Sequential Runner Changes (`src/orchestrator/sequential-runner.ts`)
+
+Same pattern as wave-runner: accept adapter via options, delegate to it.
+
+### 5. Cost Tracker Integration (`src/cost/tracker.ts`)
+
+Add a method that accepts the adapter's unified usage format:
+
+```typescript
+recordFromAdapter(
+  usage: AdapterUsage,
+  agent: string,
+  waveNumber?: number,
+): void {
+  this.record({
+    agent,
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    cacheReadTokens: usage.cacheReadTokens,
+    cacheWriteTokens: usage.cacheWriteTokens,
+    model: usage.model,
+    waveNumber,
+  });
+}
+```
+
+The existing `recordFromResponse()` method stays for Planner/High Court/Librarian (which remain on raw SDK).
+
+### 6. Planner Stays on SDK
+
+The Planner (`src/stations/planner.ts`) uses `zodOutputFormat(PlanSchema)` for structured output. This requires the raw Anthropic SDK's `messages.parse()` method. The Planner MUST NOT use the adapter system -- it is not a "worker" and needs guaranteed JSON schema output.
+
+Same for High Court (`src/judges/high-court.ts`) and Librarian (`src/stations/librarian.ts`) -- they need structured output guarantees.
+
+### 7. Touch Map Enforcement -- Two Layers for Claude Code
+
+For the SDK adapter, touch map works exactly as today (post-hoc git diff check via `validateTouchMap()`).
+
+For the Claude Code adapter, enforcement operates at TWO layers:
+1. **Pre-execution:** `allowedTools` in the Agent SDK options restricts Write/Edit to declared file paths
+2. **Post-execution:** `validateTouchMap()` still runs in the orchestrator
+
+This dual enforcement means Claude Code tasks are actually MORE constrained than SDK tasks. The `allowedTools` approach uses Claude Code's [permission rule syntax](https://code.claude.com/docs/en/settings#permission-rule-syntax) where `Write(path)` restricts writes to that specific path.
+
+## Capability-Aware Planning
+
+### The Problem
+
+The Planner currently generates tasks assuming a dumb executor: it specifies exact function signatures, data types, and file contents because the SDK worker gets ONE shot with no ability to iterate. But Claude Code workers can read files, run tests, and fix mistakes autonomously.
+
+### The Solution: Capability-Injected Planner Prompt
+
+The Planner's system prompt gains a dynamic section describing the worker's capabilities. This is injected at plan-generation time based on the selected adapter.
+
+```typescript
+// src/prompts/planner-system.ts -- add capability section builder
+
+export function buildCapabilitySection(capabilities: AgentCapabilities): string {
+  const lines: string[] = ['\nWORKER CAPABILITIES:'];
+
+  if (capabilities.canIterate) {
+    lines.push('- Workers CAN run tests and fix errors autonomously.');
+    lines.push('- Focus descriptions on WHAT to build and WHY, not exact code.');
+    lines.push('- Acceptance criteria SHOULD include runnable commands (e.g., "npm test passes").');
+  } else {
+    lines.push('- Workers execute in a SINGLE PASS with no ability to test or retry.');
+    lines.push('- Descriptions MUST include exact function signatures, types, and structure.');
+    lines.push('- Acceptance criteria should be structural, not behavioral.');
+  }
+
+  if (capabilities.canReadFiles) {
+    lines.push('- Workers CAN read any file in the project. reads[] is a hint, not a restriction.');
+  } else {
+    lines.push('- Workers can ONLY see files listed in reads[]. All context must be declared.');
+  }
+
+  if (capabilities.canRunCommands) {
+    lines.push('- Workers CAN run shell commands (npm test, npx tsc, etc.).');
+  }
+
+  return lines.join('\n');
+}
+```
+
+This means the same Planner produces DIFFERENT plans based on the selected backend:
+
+| Aspect | SDK Plan | Claude Code Plan |
+|--------|----------|------------------|
+| Task descriptions | Verbose: exact signatures, types, code structure | Concise: what to build, acceptance criteria |
+| reads[] | Exhaustive: every file the worker needs | Minimal: key starting points |
+| acceptanceCriteria | Structural: "exports function X with signature Y" | Behavioral: "npm test passes", "npx tsc --noEmit succeeds" |
+| Task granularity | Fine: 1-2 files per task | Coarser: 3-5 files per task feasible |
+
+### Planner Integration Point
+
+```typescript
+// src/stations/planner.ts -- inject capabilities into system prompt
+export async function generatePlan(
+  spec: string,
+  config: AnvilConfig,
+  options?: GeneratePlanOptions & { capabilities?: AgentCapabilities },
+): Promise<Plan> {
+  const systemPrompt = options?.capabilities
+    ? PLANNER_SYSTEM_PROMPT + '\n\n' + buildCapabilitySection(options.capabilities)
+    : PLANNER_SYSTEM_PROMPT;
+  // Pass systemPrompt through to _generateWithRetry
+}
+```
 
 ## Anti-Patterns to Avoid
 
-### Anti-Pattern 1: Shared Mutable State Between Workers
-**What:** Workers reading/writing a shared state file or database during execution.
-**Why bad:** Race conditions, non-deterministic results, impossible to debug.
-**Instead:** Workers are fully isolated in worktrees. Communication only through Orchestrator after wave completion.
+### Anti-Pattern 1: Adapter Owns Git
+**What:** Letting adapters make commits or manage branches.
+**Why bad:** Breaks worktree isolation model. Wave-runner needs deterministic merge ordering. If Claude Code auto-commits, the worktree branch may have multiple commits that conflict with Anvil's single-commit-per-task model.
+**Instead:** Adapters write files only. `disallowedTools: ['Bash(git *)']` prevents Claude Code from touching git. Orchestrator handles all git operations.
 
-### Anti-Pattern 2: LLM-Powered Sub-Judges
-**What:** Using AI calls for mechanical checks (does it compile? do tests pass?).
-**Why bad:** Expensive, non-deterministic, slower than running the actual tool.
-**Instead:** Sub-Judges run real tools (tsc, jest, eslint). Deterministic pass/fail.
+### Anti-Pattern 2: Adapter Validates Touch Map
+**What:** Moving touch map validation into the adapter.
+**Why bad:** Each adapter would need its own validation logic. Claude Code's `allowedTools` is necessary but not sufficient (files could be created by Bash commands that bypass Write/Edit tool restrictions).
+**Instead:** Keep `validateTouchMap()` in the orchestrator as defense-in-depth. Always runs after adapter returns.
 
-### Anti-Pattern 3: Per-Task Merging (Merge As You Go)
-**What:** Merging each Worker's branch immediately upon completion.
-**Why bad:** Later Workers in the same wave may conflict. Partial merges leave main in inconsistent state.
-**Instead:** Wait for all Workers in a wave to complete, then merge all at once. Sub-Judges validate the merged result.
+### Anti-Pattern 3: Fat Adapter Interface
+**What:** Adding methods like `readFile()`, `runTest()`, `lint()` to the adapter.
+**Why bad:** Only Claude Code has these capabilities. SDK adapter would need stubs. Violates Interface Segregation.
+**Instead:** Single `execute()` method. Capabilities are DECLARED as data, not exposed as methods.
 
-### Anti-Pattern 4: Monolithic Orchestrator
-**What:** One giant function that handles planning, execution, review, and output.
-**Why bad:** Untestable, unresumable, impossible to extend.
-**Instead:** Orchestrator is a state machine that delegates to stations. Each station is independently testable.
+### Anti-Pattern 4: Planner Queries Adapter at Runtime
+**What:** Planner calling adapter methods during plan generation.
+**Why bad:** Creates coupling between Planner and adapter. Planner runs before adapters are needed.
+**Instead:** Pass `AgentCapabilities` (a plain data object) to the Planner at generation time.
 
-### Anti-Pattern 5: Workers Planning Their Own Scope
-**What:** Workers deciding what to build or expanding task scope beyond the plan.
-**Why bad:** Breaks touch map guarantees. Creates undeclared dependencies. Violates Forge principle.
-**Instead:** Workers receive a fixed task spec. If they discover the plan is wrong, they emit PLAN_GAP and halt.
+### Anti-Pattern 5: Claude Code Worker Uses Interactive Mode or Raw CLI
+**What:** Spawning `claude -p` as a raw subprocess instead of using the TypeScript Agent SDK.
+**Why bad:** Requires parsing CLI output. No type safety. Harder to get structured usage data. The Agent SDK `query()` function exists specifically for programmatic usage and returns typed `SDKMessage` objects.
+**Instead:** Use `@anthropic-ai/claude-agent-sdk` `query()` function.
 
-## Component Build Order
+## Patterns to Follow
 
-The architecture has clear dependency layers. Build bottom-up:
-
-```
-Layer 0 (Foundation - no dependencies):
-  - Types/schemas (Plan, Task, Wave, Reports, State)
-  - Config loader
-  - Logger
-  - Cost tracking primitives (TokenUsage accumulator)
-
-Layer 1 (Infrastructure - depends on Layer 0):
-  - Git wrapper (simple-git + raw worktree commands)
-  - Anthropic API wrapper (with token counting, retry, streaming)
-  - State persistence (JSON read/write with snapshots)
-  - Touch map validator
-
-Layer 2 (Stations - depends on Layers 0-1):
-  - Planner Station (API wrapper + schema validation)
-  - Worker (API wrapper + git wrapper + touch map validator)
-  - Sub-Judge runners (tsc, test, lint, touch map check)
-  - Wave Scheduler (pure function, depends only on types)
-
-Layer 3 (Orchestration - depends on Layers 0-2):
-  - Worker Pool (manages Worker concurrency)
-  - Worktree Manager (create/merge/cleanup lifecycle)
-  - Merge Engine (orchestrates post-wave merging)
-  - Sub-Judge Panel (runs Sub-Judges in parallel, collects reports)
-
-Layer 4 (Review - depends on Layers 0-3):
-  - High Court (API wrapper + handoff-first logic)
-  - Librarian (reads codebase, generates docs)
-  - Cost Auditor (aggregates all TokenUsage into report)
-
-Layer 5 (CLI - depends on all layers):
-  - CLI commands (run, status, cost, logs, resume, cancel, ship)
-  - Progress display
-  - Human escalation prompts
-  - Signal handling (Ctrl+C graceful shutdown)
+### Pattern 1: Strategy via Constructor Injection
+**What:** Wave-runner receives an adapter via its options parameter, not via global lookup.
+**When:** Always. Enables testing with mock adapters.
+```typescript
+export async function executeInWaves(
+  plan: Plan,
+  config: AnvilConfig,
+  options?: { adapter?: AgentAdapter; ... },
+): Promise<WaveExecutionResult> {
+  const adapter = options?.adapter ?? resolveAdapter(config.agent);
+}
 ```
 
-**Critical path for MVP:** Layers 0-1, then Planner + Worker + Wave Scheduler from Layer 2, then Worker Pool + Worktree Manager + Merge Engine from Layer 3. This gives you end-to-end execution without review. Add Sub-Judges and High Court next for quality gates.
+### Pattern 2: Unified Result Type
+**What:** Both adapters return `AdapterResult` with the same shape.
+**When:** Always. Decouples orchestrator from adapter internals.
 
-## State Machine
+### Pattern 3: Defense-in-Depth Validation
+**What:** Touch map validation runs AFTER adapter returns, regardless of adapter type.
+**When:** Every task execution. Claude Code's `allowedTools` is a first line; `validateTouchMap()` is the authoritative check.
 
-The Orchestrator is a finite state machine:
+### Pattern 4: Capability Declaration as Data
+**What:** Capabilities are a readonly plain object, not methods or runtime checks.
+**When:** Passing capability info to the Planner. Used for prompt injection, never for runtime branching in the orchestrator.
 
-```
-INIT --> PLANNING --> SCHEDULING --> EXECUTING --> MERGING --> JUDGING
-                                       ^            |           |
-                                       |            v           |
-                                       +--- (next wave) <------+
-                                                                |
-EXECUTING --> PAUSED (PLAN_GAP or HUMAN_REQUIRED)               |
-PAUSED --> EXECUTING (after human input)                        |
-                                                                v
-                                                         REVIEWING (High Court)
-                                                                |
-                                                   +------------+------------+
-                                                   |            |            |
-                                                   v            v            v
-                                                MERGING    HUMAN_REVIEW   ABORTED
-                                                   |            |
-                                                   v            v
-                                              FINALIZING   PAUSED
-                                                   |            |
-                                                   v            v
-                                               COMPLETE    FINALIZING
-```
-
-Each state transition writes a snapshot to `.anvil/state.json`, enabling crash recovery. On resume, the Orchestrator reads the last snapshot and re-enters the appropriate state.
-
-## File System Layout
+## File Structure
 
 ```
-project-root/
-  .anvil/
-    state.json              # Current session state (latest snapshot)
-    history/                # Previous state snapshots for audit
-      state-001.json
-      state-002.json
-    plan.json               # Planner output
-    worktrees/              # Git worktrees (temporary, cleaned after merge)
-      task-001/
-      task-002/
-    reports/
-      wave-1-subjudge.json  # Sub-Judge results per wave
-      wave-2-subjudge.json
-      high-court.json       # High Court verdict
-    cost-report.json        # Token/cost breakdown
-    audit.log               # Append-only event log
-    docs/                   # Librarian output
-      README.md
-      ARCHITECTURE.md
+src/
+  adapters/
+    types.ts                # AgentAdapter, AdapterResult, AdapterUsage, AgentCapabilities
+    sdk-adapter.ts          # SdkAdapter (refactored from worker.ts)
+    claude-code-adapter.ts  # ClaudeCodeAdapter (new)
+    index.ts                # resolveAdapter() factory, re-exports
+  workers/
+    worker.ts               # Becomes thin re-export or deprecated
+  prompts/
+    worker-system.ts        # SDK worker prompt (unchanged, used by SdkAdapter)
+    planner-system.ts       # + buildCapabilitySection() export
+  schemas/
+    config.ts               # + agent field
+  cost/
+    tracker.ts              # + recordFromAdapter() method
+  orchestrator/
+    wave-runner.ts          # + adapter parameter, touch map moves here
+    sequential-runner.ts    # + adapter parameter
 ```
+
+## Suggested Build Order
+
+Each step is independently testable. Build order respects dependency chain.
+
+### Step 1: Adapter Interface + Types
+Create `src/adapters/types.ts`. Pure type definitions, no runtime code. No dependencies.
+
+### Step 2: SDK Adapter (Extract from worker.ts)
+Move `executeTask()` logic from `src/workers/worker.ts` into `SdkAdapter.execute()`. Keep `worker.ts` as a thin wrapper that delegates to `SdkAdapter` for backward compatibility. All existing tests pass unchanged.
+
+### Step 3: Wire Adapter into Orchestrators
+Update `wave-runner.ts` and `sequential-runner.ts` to accept `AgentAdapter` via options. Default to `new SdkAdapter()`. Move `validateTouchMap()` call from worker into orchestrator (it currently lives in `executeTask()`). Existing behavior is identical.
+
+### Step 4: Config + CLI Flag
+Add `agent` field to `AnvilConfigSchema`. Add `--agent` flag to CLI. Add `resolveAdapter()` factory in `src/adapters/index.ts`. Wire through `loadConfig()`.
+
+### Step 5: Cost Tracker Update
+Add `recordFromAdapter()` method to `CostTracker`. Update orchestrators to use it instead of directly calling `recordFromResponse()` with SDK-specific shapes.
+
+### Step 6: Claude Code Adapter
+Implement `ClaudeCodeAdapter`. Add `@anthropic-ai/claude-agent-sdk` as dependency. This is the first step requiring a new npm package.
+
+### Step 7: Capability-Aware Planner
+Add `buildCapabilitySection()` to `src/prompts/planner-system.ts`. Update `generatePlan()` signature to accept optional `capabilities`. Wire adapter capabilities through CLI -> planner.
+
+### Step 8: Integration Testing
+End-to-end: select `--agent claude-code`, plan generates capability-appropriate tasks, Claude Code executes in worktree, touch map validates, wave merges correctly, cost tracked.
 
 ## Scalability Considerations
 
-| Concern | Solo dev (1-10 tasks) | Medium project (10-50 tasks) | Large project (50+ tasks) |
-|---------|----------------------|------------------------------|--------------------------|
-| Parallelism | 2-4 Workers per wave | 4-8 Workers per wave | 8+ Workers, may hit API rate limits |
-| State size | JSON files sufficient | JSON files sufficient | Consider SQLite for audit trail |
-| Worktree overhead | Negligible | ~100MB disk per worktree | Disk space monitoring needed |
-| API cost | ~$0.50-2 per run | ~$5-20 per run | $20+ per run, cost auditor critical |
-| Wave count | 1-3 waves | 3-8 waves | 8+ waves, resume capability important |
-| Merge complexity | Trivial (no overlaps by construction) | Same (touch maps enforce) | Same (touch maps enforce) |
-
-## Key Technical Decisions
-
-### simple-git for Git Operations (HIGH confidence)
-simple-git is the standard Node.js git library. It does NOT have native worktree methods -- use `git.raw(['worktree', ...])` for all worktree operations. This is well-documented and widely used. Consider writing a thin `WorktreeManager` class that wraps these raw calls with proper TypeScript types and error handling.
-
-### JSON State Files Over SQLite for v1 (MEDIUM confidence)
-JSON files are simpler, human-readable, and debuggable. SQLite adds query power but adds a native dependency (better-sqlite3). For v1 with <50 tasks per session, JSON is sufficient. SQLite can be added later for audit trail queries without changing the station interfaces (just the persistence layer).
-
-### Kahn's Algorithm for Wave Scheduling (HIGH confidence)
-Standard algorithm for topological sort with level detection. Well-understood, O(V+E) complexity, naturally produces wave groupings. No need for a library -- implement directly (~30 lines of TypeScript).
-
-### Anthropic SDK Direct Over Agent Frameworks (HIGH confidence)
-Anvil's agent pattern (Planner, Worker, Judge) is domain-specific and simpler than what frameworks like LangGraph/LangChain provide. The overhead of learning and adapting a framework exceeds the cost of direct API calls with structured prompts. Each station makes 1-3 API calls with specific system prompts. No need for chains, graphs, or tool-use abstractions for v1.
+| Concern | 1-4 workers | 8-16 workers | Future: other CLI agents |
+|---------|-------------|--------------|--------------------------|
+| Process spawning | Agent SDK manages one subprocess per `query()` call | May hit OS process limits; `maxWorkers` config already exists as throttle | Same pattern -- each adapter manages its own processes |
+| Memory | ~100-150MB per Claude Code subprocess | ~800MB-2GB total | Monitor per-adapter memory footprint |
+| Cost tracking | Each `AdapterResult` reports usage independently | Same -- CostTracker aggregates | Adapter contract requires usage in result |
+| Adding new backends | N/A | N/A | Implement `AgentAdapter` interface, add case to `resolveAdapter()`, declare capabilities |
 
 ## Sources
 
-- [Upsun: Git worktrees for parallel AI coding agents](https://devcenter.upsun.com/posts/git-worktrees-for-parallel-ai-coding-agents/)
-- [Agent Interviews: Parallel AI Coding with Git Worktrees](https://docs.agentinterviews.com/blog/parallel-ai-coding-with-gitworktrees/)
-- [DEV: How We Built True Parallel Agents With Git Worktrees](https://dev.to/getpochi/how-we-built-true-parallel-agents-with-git-worktrees-2580)
-- [Microsoft Azure: AI Agent Orchestration Patterns](https://learn.microsoft.com/en-us/azure/architecture/ai-ml/guide/ai-agent-design-patterns)
-- [SitePoint: Agentic Design Patterns Guide 2026](https://www.sitepoint.com/the-definitive-guide-to-agentic-design-patterns-in-2026/)
-- [simple-git npm](https://www.npmjs.com/package/simple-git)
-- [steveukx/git-js on GitHub](https://github.com/steveukx/git-js)
-- [DZone: Parallelizing Tasks with Dependencies](https://dzone.com/articles/parallelizing-tasks-with-dependencies-design-your)
-- [Bruno Scheufler: Scheduling Tasks with Topological Sorting](https://brunoscheufler.com/blog/2021-11-27-scheduling-tasks-with-topological-sorting)
-- [Turso: AgentFS with SQLite-backed agent state](https://turso.tech/blog/agentfs-fuse)
-- [ccswarm: Multi-agent orchestration with Claude Code and git worktree isolation](https://github.com/nwiizo/ccswarm)
-- [Scaling 120+ AI Agents with Two-Tier Orchestration](https://www.decodingai.com/p/scaling-120-ai-agents-two-tier-orchestration)
+- [Claude Code CLI Reference](https://code.claude.com/docs/en/cli-reference) -- Official CLI flags including `--allowedTools`, `--disallowedTools`, permission rule syntax -- HIGH confidence
+- [Run Claude Code Programmatically (Agent SDK)](https://code.claude.com/docs/en/headless) -- Agent SDK overview, `-p` mode, subprocess model -- HIGH confidence
+- [Agent SDK TypeScript Reference](https://platform.claude.com/docs/en/agent-sdk/typescript) -- `query()` API, `Options` type (cwd, systemPrompt, allowedTools, permissionMode, maxTurns, maxBudgetUsd, persistSession), `SDKResultMessage` (usage, total_cost_usd, modelUsage), `SDKMessage` union type -- HIGH confidence
+- [@anthropic-ai/claude-agent-sdk on npm](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) -- Package exists and is installable -- HIGH confidence
+- Existing Anvil source code: `src/workers/worker.ts`, `src/orchestrator/wave-runner.ts`, `src/orchestrator/sequential-runner.ts`, `src/cost/tracker.ts`, `src/schemas/config.ts`, `src/stations/planner.ts` -- PRIMARY source for integration points
