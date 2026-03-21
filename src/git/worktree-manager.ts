@@ -152,7 +152,9 @@ const IGNORED_PATTERNS = [
 
 function isIgnoredFile(file: string): boolean {
   return IGNORED_PATTERNS.some((pattern) =>
-    pattern.endsWith('/') ? file.startsWith(pattern) : file === pattern,
+    pattern.endsWith('/')
+      ? file.startsWith(pattern) || file === pattern.slice(0, -1)
+      : file === pattern,
   );
 }
 
@@ -161,8 +163,20 @@ export async function validateTouchMap(
   writes: string[],
 ): Promise<{ valid: boolean; violations: string[] }> {
   const worktreeGit = simpleGit(worktreePath);
-  const diff = await worktreeGit.diff(['--name-only', 'HEAD']);
-  const untracked = await worktreeGit.raw(['ls-files', '--others', '--exclude-standard']);
+  // Use diff against HEAD for tracked changes
+  let diff = '';
+  try {
+    diff = await worktreeGit.diff(['--name-only', 'HEAD']);
+  } catch {
+    // HEAD may not exist in fresh repos
+  }
+  // For untracked files, exclude common generated dirs at the git level
+  const untracked = await worktreeGit.raw([
+    'ls-files', '--others', '--exclude-standard',
+    '--exclude', 'node_modules',
+    '--exclude', '.anvil',
+    '--exclude', 'dist',
+  ]);
   const allChanged = [...diff.split('\n'), ...untracked.split('\n')].filter(
     (f) => f.length > 0,
   );
