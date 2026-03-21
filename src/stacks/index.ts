@@ -10,11 +10,23 @@ const typescript: StackPreset = {
   plannerInstructions: `DEFAULT STACK:
 - TypeScript 5.x, strict mode, ESM ("type": "module")
 - Node 22+ (use built-in crypto.randomUUID(), no external UUID lib)
-- Vitest for testing
-- Zod for runtime validation
+- Vitest for testing, supertest for API testing
+- Zod for runtime validation (schemas as source of truth)
 - tsconfig.json: strict: true, target: "ES2022", module: "node16", moduleResolution: "node16"
 - package.json: "type": "module"
-- devDependencies MUST include: typescript, vitest, @types/node (CRITICAL — without @types/node, process/Buffer/etc. cause tsc errors)`,
+- devDependencies MUST include: typescript, vitest, @types/node, supertest, @types/supertest, @types/express (if using Express)
+- dependencies for APIs MUST include: express, zod, cors
+- The scaffold task MUST create a .env.example file listing all environment variables the app uses
+
+SENIOR ARCHITECTURE REQUIREMENTS (scaffold task MUST set up):
+- package.json scripts: "dev": "tsx src/index.ts", "build": "tsc", "start": "node dist/index.js", "test": "vitest run", "typecheck": "tsc --noEmit"
+- .gitignore: node_modules/, dist/, .env, *.log
+- The project MUST follow this file structure:
+  src/types.ts or src/schemas.ts — Zod schemas + inferred types
+  src/service.ts or src/[name].ts — pure business logic (no HTTP objects)
+  src/app.ts — Express app setup + routes (export default app, NO .listen())
+  src/index.ts — entry point (import app, read PORT from env, call .listen())
+  tests/ or src/*.test.ts — comprehensive tests`,
 };
 
 const python: StackPreset = {

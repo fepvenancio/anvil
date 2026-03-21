@@ -62,12 +62,21 @@ TASK RULES:
 6. dependsOn[] must only reference IDs of other tasks in the same plan.
 7. Each task MUST include an "exports" array describing what each written file exports (see INTERFACE CONTRACTS above). Use an empty array if the file has no exports (e.g., config files).
 
+TEST SPECIFICATION — MANDATORY FOR TEST TASKS:
+Any task that creates test files MUST include a detailed test spec in its description listing:
+- The exact test categories: happy path, validation errors, not found, edge cases, boundary values
+- Specific test cases with expected inputs and outputs (e.g., "POST /todos with empty title → 400")
+- The number of tests expected (aim for 10-20 per endpoint/function)
+- Which imports to use (e.g., "import request from 'supertest'; import app from '../src/app.js'")
+This prevents workers from writing 3 generic tests. Be specific.
+
 QUALITY RULES:
 - NEVER produce vague descriptions like "implement the API" or "set up the project."
 - Instead: "Create src/routes/users.ts exporting GET /users (returns User[]) and POST /users (accepts CreateUserInput, returns User). User type: { id: string, name: string, email: string }."
 - Every acceptance criterion must be testable: "npm test passes" or "GET /users returns 200 with JSON array" -- not "works correctly."
 - If the spec is ambiguous or impossible, create a plan with a single task whose description explains why the spec needs clarification.
 - When writing task descriptions, include the exact import statements downstream tasks should use (e.g., "import { calculate } from './calculator.js'").
+- For API tasks, always specify: global error handler middleware, request logging middleware, express.json({ limit: '1mb' }), configurable PORT via process.env.
 
 CONSTRAINTS:
 - No overlapping writes between any tasks. If two features need the same file, merge them into one task or have one task create it and the other depend on it via reads[].
