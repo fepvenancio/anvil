@@ -60,9 +60,9 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### CLI UX
 
-- [ ] **CLUX-01**: Live progress display showing current wave, task status, and judge verdicts
-- [ ] **CLUX-02**: Color-coded output: green (passed), yellow (warning), red (failed/escalation)
-- [ ] **CLUX-03**: Build completion summary with next steps (status, cost, git push, ship --pr)
+- [x] **CLUX-01**: Live progress display showing current wave, task status, and judge verdicts
+- [x] **CLUX-02**: Color-coded output: green (passed), yellow (warning), red (failed/escalation)
+- [x] **CLUX-03**: Build completion summary with next steps (status, cost, git push, ship --pr)
 - [x] **CLUX-04**: `.anvil/` folder contains full audit trail: plan, wave reports, judge verdicts, cost summary
 
 ## v2 Requirements
@@ -149,9 +149,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | LIBR-01 | Phase 4 | Complete |
 | LIBR-02 | Phase 4 | Complete |
 | LIBR-03 | Phase 4 | Complete |
-| CLUX-01 | Phase 5 | Pending |
-| CLUX-02 | Phase 5 | Pending |
-| CLUX-03 | Phase 5 | Pending |
+| CLUX-01 | Phase 5 | Complete |
+| CLUX-02 | Phase 5 | Complete |
+| CLUX-03 | Phase 5 | Complete |
 | CLUX-04 | Phase 1 | Complete |
 
 **Coverage:**
