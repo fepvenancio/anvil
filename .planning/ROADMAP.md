@@ -63,12 +63,12 @@ Plans:
   3. Sub-Judges run after every wave: minimal v1 set = tsc check, touch-map violation detector, vitest run (if tests exist)
   4. A Sub-Judge failure does not halt the current wave (other tasks finish), but halts progression to the next wave -- all failures reported together
   5. A failed Worker task is reported but does not crash the entire wave; other tasks in the wave complete
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 03-01: TBD
-- [ ] 03-02: TBD
-- [ ] 03-03: TBD
+- [ ] 03-01-PLAN.md — Wave runner: topologicalWaves, batch merge, parallel execution with p-limit, error isolation
+- [ ] 03-02-PLAN.md — Sub-Judge panel: tsc, vitest, and touch-map mechanical checkers
+- [ ] 03-03-PLAN.md — Integration: wire Sub-Judges into wave runner, update CLI to use wave execution
 
 ### Phase 4: AI Review and Audit Trail
 **Goal**: Completed builds receive an AI architectural review from High Court, auto-generated documentation from the Librarian, and full cost tracking throughout
@@ -113,6 +113,6 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 |-------|----------------|--------|-----------|
 | 1. Foundation | 2/2 | Complete | 2026-03-21 |
 | 2. Planner and Sequential Execution | 3/4 | Gap closure | - |
-| 3. Parallel Waves and Quality Gates | 0/? | Not started | - |
+| 3. Parallel Waves and Quality Gates | 0/3 | Planned | - |
 | 4. AI Review and Audit Trail | 0/? | Not started | - |
 | 5. CLI Polish | 0/? | Not started | - |
