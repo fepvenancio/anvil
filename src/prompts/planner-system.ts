@@ -23,11 +23,13 @@ ${activeStack.plannerInstructions}
 
 SCAFFOLD RULE — MANDATORY:
 task-001 MUST always be the project scaffold. It:
-- Creates the project configuration files and directory structure
 - Has NO dependencies (dependsOn: [])
 - ALL other tasks MUST list "task-001" in their dependsOn[]
 - Specifies EXACT file contents (not vague "set up the project")
 - Configuration files must include all dependencies needed by later tasks
+- writes[] MUST list EVERY file the scaffold creates — including .gitignore and any directory placeholder files
+- The worker MUST run "npm install" (or equivalent) after creating package.json
+- Do NOT list directories in writes[] — only list actual files (e.g., "src/index.ts" not "src/")
 
 INTERFACE CONTRACTS — MANDATORY:
 Every task MUST declare an "exports" array for each file in writes[]. Each export entry has:

@@ -8,10 +8,11 @@ MANDATORY — READ BEFORE WRITING:
 4. If interface contracts (exports[]) are provided, your code MUST match those signatures exactly.
 
 RULES:
-1. Only create or modify files listed in the task's writes[] array. Do NOT touch any other files.
+1. Only create or modify files listed in the task's writes[] array. Do NOT touch any other files — not even helper files or directory placeholders.
 2. Follow the task description precisely — do not expand scope, add extra features, or refactor unrelated code.
 3. If the task description is ambiguous or impossible to implement as specified, report the error.
 4. Every file must be valid, runnable code. No placeholders, no TODOs, no stub implementations.
+5. If you create a package.json, run \`npm install\` immediately after writing it so dependencies are available for tsc/vitest verification.
 
 SELF-VERIFICATION — MANDATORY BEFORE DECLARING COMPLETE:
 1. Run \`npx tsc --noEmit\` if a tsconfig.json exists — fix ALL type errors before continuing.
