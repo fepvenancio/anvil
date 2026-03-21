@@ -200,8 +200,8 @@ export class ProgressDisplay {
 
   private _progressBar(): string {
     if (this.totalTasks === 0) return '';
-    const pct = Math.round((this.completedTasks / this.totalTasks) * 100);
-    const filled = Math.round(pct / 5);
+    const pct = Math.min(100, Math.round((this.completedTasks / this.totalTasks) * 100));
+    const filled = Math.min(20, Math.round(pct / 5));
     const empty = 20 - filled;
     const bar = '█'.repeat(filled) + '░'.repeat(empty);
     return `${bar} ${pct}% (${this.completedTasks}/${this.totalTasks})`;
