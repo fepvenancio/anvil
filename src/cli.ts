@@ -14,6 +14,9 @@ import { formatCostSummary } from './cost/display.js';
 import { runHighCourt } from './judges/high-court.js';
 import { runLibrarian } from './stations/librarian.js';
 import { simpleGit } from 'simple-git';
+import { statusCommand } from './cli/status.js';
+import { costCommand } from './cli/cost.js';
+import { logsCommand } from './cli/logs.js';
 
 const program = new Command();
 
@@ -181,5 +184,9 @@ program
       }
     }
   });
+
+program.addCommand(statusCommand);
+program.addCommand(costCommand);
+program.addCommand(logsCommand);
 
 await program.parseAsync();
