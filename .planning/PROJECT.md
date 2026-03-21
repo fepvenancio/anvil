@@ -29,6 +29,11 @@ Target user: solo devs who loved Forge's power but hated the 40GB RAM / Docker /
 - ✓ Batch merge after each wave with worktree cleanup — Phase 3
 - ✓ Sub-Judge panel: tsc, vitest, touch-map mechanical checks — Phase 3
 - ✓ Sub-Judge failure halts wave progression — Phase 3
+- ✓ High Court AI architectural review (merge/human_required/abort) — Phase 4
+- ✓ Rollback on abort/escalate (git reset --hard to baseline) — Phase 4
+- ✓ Librarian auto-generates README.md + ARCHITECTURE.md — Phase 4
+- ✓ Cost tracking per agent call with per-wave/session aggregation — Phase 4
+- ✓ Cost summary display + .anvil/cost-report.json — Phase 4
 
 ### Active
 
@@ -121,4 +126,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-03-21 after Phase 3 completion*
+*Last updated: 2026-03-21 after Phase 4 completion*
