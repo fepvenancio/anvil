@@ -53,21 +53,22 @@ program
     // Phase 5: Resolve stack preset
     const stack = opts.stack ? getStackPreset(opts.stack) : undefined;
 
-    console.log(chalk.bold('\nAnvil\n'));
-    console.log(`  Project:     ${config.projectName}`);
-    console.log(`  Model:       ${config.model}`);
-    console.log(`  Max Workers: ${config.maxWorkers}`);
-    console.log(`  Stack:       ${stack?.name ?? 'typescript (default)'}`);
-    console.log(`  Spec:        ${finalSpec.length > 80 ? finalSpec.slice(0, 77) + '...' : finalSpec}`);
+    const progress = new ProgressDisplay();
+    progress.printBanner(finalSpec);
+
+    console.log(chalk.dim(`  Project:     ${config.projectName}`));
+    console.log(chalk.dim(`  Model:       ${config.model}`));
+    console.log(chalk.dim(`  Max Workers: ${config.maxWorkers}`));
+    console.log(chalk.dim(`  Stack:       ${stack?.name ?? 'typescript (default)'}`));
     console.log();
 
     // Phase 2: Planner -> Review -> Execute pipeline
-    console.log(chalk.blue('Planning...'));
+    progress.printPlanningBanner();
     const plan = await generatePlan(finalSpec, config, { stack, projectDir: process.cwd() });
 
     // Plan critic: LLM + deterministic validation
     const { critiquePlan } = await import('./stations/plan-critic.js');
-    console.log(chalk.blue('Validating plan...'));
+    progress.printValidatingBanner();
     const criticResult = await critiquePlan(plan, config);
     if (!criticResult.approved) {
       console.log(chalk.yellow(`Plan critic found ${criticResult.issues.length} issue(s):`));
@@ -115,7 +116,6 @@ program
       const baseDir = process.cwd();
       const git = simpleGit(baseDir);
       const costTracker = new CostTracker();
-      const progress = new ProgressDisplay();
 
       // Ensure .gitignore exists so npm install artifacts don't pollute git
       const gitignorePath = join(baseDir, '.gitignore');
@@ -136,7 +136,7 @@ program
       // Capture baseline SHA BEFORE execution (critical: HEAD moves during wave merges)
       const baselineSha = await git.revparse(['HEAD']);
 
-      console.log(chalk.blue('\nExecuting plan (parallel waves)...\n'));
+      progress.printExecutionBanner(reviewedPlan.tasks.length, reviewedPlan.tasks.length);
       const result = await executeInWaves(reviewedPlan, config, { costTracker, progress });
 
       // Save judge reports
@@ -151,7 +151,7 @@ program
 
       if (result.success) {
         // --- Final integration check: tsc + vitest on fully merged codebase ---
-        console.log(chalk.blue('\nRunning final integration check...\n'));
+        progress.printFinalCheckBanner();
         const { runSubJudges: runFinalCheck } = await import('./judges/sub-judge-panel.js');
         const finalCheck = await runFinalCheck(baseDir, 0, reviewedPlan.tasks, baselineSha);
         const finalFailed = finalCheck.checks.filter(c => !c.passed);
@@ -169,7 +169,7 @@ program
         }
 
         // --- Post-wave pipeline ---
-        console.log(chalk.blue('\nRunning High Court architectural review...\n'));
+        progress.printHighCourtBanner();
         const highCourtReport = await runHighCourt(
           baseDir, reviewedPlan, result.judgeReports, config,
           { baselineSha },
@@ -194,7 +194,7 @@ program
         } else {
           // High Court approved — run Librarian
           console.log(chalk.green(`High Court verdict: merge`));
-          console.log(chalk.blue('\nGenerating documentation...\n'));
+          progress.printLibrarianBanner();
           const docs = await runLibrarian(
             baseDir, reviewedPlan, highCourtReport, config,
           );

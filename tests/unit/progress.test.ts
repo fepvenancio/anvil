@@ -72,15 +72,15 @@ describe('ProgressDisplay', () => {
       p.judgeResult({ name: 'tsc', passed: true });
       const output = logSpy.mock.calls[0][0] as string;
       expect(output).toContain('\u2713');
-      expect(output).toContain('Judge: tsc');
+      expect(output).toContain('tsc');
     });
 
     it('judgeResult logs failed check with message', () => {
       const p = new ProgressDisplay({ silent: true });
       p.judgeResult({ name: 'vitest', passed: false, message: 'tests failed' });
       const output = logSpy.mock.calls[0][0] as string;
-      expect(output).toContain('\u2717');
-      expect(output).toContain('Judge: vitest');
+      expect(output).toContain('✗');
+      expect(output).toContain('vitest');
       expect(output).toContain('tests failed');
     });
   });
