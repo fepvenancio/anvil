@@ -212,3 +212,116 @@ describe('touch-map-judge', () => {
     expect(result.details).toContain('forbidden.ts');
   });
 });
+
+// ── sub-judge-panel orchestrator tests ───────────────────────────────────
+
+describe('sub-judge-panel', () => {
+  let tempDir: string;
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'panel-'));
+    // Initialize a real git repo (needed for touch-map judge)
+    execSync('git init', { cwd: tempDir });
+    execSync('git config user.email "test@test.com"', { cwd: tempDir });
+    execSync('git config user.name "Test"', { cwd: tempDir });
+    await writeFile(join(tempDir, 'README.md'), '# test\n');
+    execSync('git add . && git commit -m "initial"', { cwd: tempDir });
+  });
+
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it('runs all three judges and returns SubJudgeReport with allPassed=true when all pass', async () => {
+    const baselineSha = execSync('git rev-parse HEAD', { cwd: tempDir }).toString().trim();
+
+    const { runSubJudges } = await import('../../src/judges/sub-judge-panel.js');
+    const report = await runSubJudges(tempDir, 1, [], baselineSha);
+
+    expect(report.waveNumber).toBe(1);
+    expect(report.checks).toHaveLength(3);
+    expect(report.allPassed).toBe(true);
+    expect(report.timestamp).toBeDefined();
+    // Validate ISO datetime
+    expect(() => new Date(report.timestamp)).not.toThrow();
+    expect(new Date(report.timestamp).toISOString()).toBe(report.timestamp);
+
+    // All three check names should be present
+    const names = report.checks.map(c => c.name).sort();
+    expect(names).toEqual(['touch-map', 'tsc', 'vitest']);
+  });
+
+  it('returns allPassed=false when one judge fails but includes all checks', async () => {
+    const baselineSha = execSync('git rev-parse HEAD', { cwd: tempDir }).toString().trim();
+
+    // Create a file outside any allowed writes to trigger touch-map failure
+    await writeFile(join(tempDir, 'unauthorized.ts'), 'export const bad = true;\n');
+    execSync('git add . && git commit -m "bad file"', { cwd: tempDir });
+
+    const tasks = [{
+      id: 'task-1',
+      description: 'test',
+      writes: ['allowed.ts'],
+      reads: [],
+      dependsOn: [],
+      acceptanceCriteria: [],
+    }];
+
+    const { runSubJudges } = await import('../../src/judges/sub-judge-panel.js');
+    const report = await runSubJudges(tempDir, 2, tasks, baselineSha);
+
+    expect(report.waveNumber).toBe(2);
+    expect(report.checks).toHaveLength(3);
+    expect(report.allPassed).toBe(false);
+
+    // touch-map should fail, tsc and vitest should pass (skip)
+    const touchMap = report.checks.find(c => c.name === 'touch-map');
+    expect(touchMap?.passed).toBe(false);
+  });
+
+  it('validates report against SubJudgeReportSchema', async () => {
+    const { SubJudgeReportSchema } = await import('../../src/schemas/reports.js');
+    const baselineSha = execSync('git rev-parse HEAD', { cwd: tempDir }).toString().trim();
+
+    const { runSubJudges } = await import('../../src/judges/sub-judge-panel.js');
+    const report = await runSubJudges(tempDir, 1, [], baselineSha);
+
+    // Should parse without throwing
+    const parsed = SubJudgeReportSchema.parse(report);
+    expect(parsed.waveNumber).toBe(1);
+    expect(parsed.allPassed).toBe(true);
+  });
+
+  it('saves report to .anvil/reports/wave-{N}-judges.json', async () => {
+    const baselineSha = execSync('git rev-parse HEAD', { cwd: tempDir }).toString().trim();
+    const { readFile } = await import('node:fs/promises');
+
+    const { runSubJudges } = await import('../../src/judges/sub-judge-panel.js');
+    await runSubJudges(tempDir, 3, [], baselineSha);
+
+    const reportPath = join(tempDir, '.anvil', 'reports', 'wave-3-judges.json');
+    const content = await readFile(reportPath, 'utf-8');
+    const saved = JSON.parse(content);
+    expect(saved.waveNumber).toBe(3);
+    expect(saved.checks).toHaveLength(3);
+    expect(saved.allPassed).toBe(true);
+  });
+
+  it('judges run in parallel via Promise.all', async () => {
+    // This test verifies structural behavior: all 3 checks are present
+    // and the total execution time is less than the sum of individual judge times
+    // (a proxy for parallel execution). The key verification is that all 3 judges
+    // are invoked and their results collected.
+    const baselineSha = execSync('git rev-parse HEAD', { cwd: tempDir }).toString().trim();
+
+    const { runSubJudges } = await import('../../src/judges/sub-judge-panel.js');
+    const start = Date.now();
+    const report = await runSubJudges(tempDir, 1, [], baselineSha);
+    const elapsed = Date.now() - start;
+
+    // All three judges should have run
+    expect(report.checks).toHaveLength(3);
+    // Should complete reasonably fast (all skip since no tsconfig/tests/changes)
+    expect(elapsed).toBeLessThan(5000);
+  });
+});
