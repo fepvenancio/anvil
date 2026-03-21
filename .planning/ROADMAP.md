@@ -45,12 +45,13 @@ Plans:
   3. User is prompted "Review plan before starting execution? (Y/n/edit)" — 'edit' opens the plan JSON in $EDITOR, re-validates on save
   4. Each task executes in its own git worktree on a dedicated branch, only touching files declared in its touch map
   5. Every Worker change appears as an atomic git commit with a descriptive message in the project's git history
-**Plans**: 3 plans
+**Plans**: 4 plans
 
 Plans:
 - [x] 02-01-PLAN.md — Planner Station with structured outputs, overlap detection, topological sort
 - [x] 02-02-PLAN.md — WorktreeManager, Worker executor, touch-map enforcement
 - [x] 02-03-PLAN.md — Plan review UI, sequential runner, CLI pipeline wiring
+- [ ] 02-04-PLAN.md — Gap closure: full pipeline integration test (mocked LLM + real git)
 
 ### Phase 3: Parallel Waves and Quality Gates
 **Goal**: Independent tasks execute in parallel within waves, merged between waves, with mechanical Sub-Judge checks gating progression
@@ -111,7 +112,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation | 2/2 | Complete | 2026-03-21 |
-| 2. Planner and Sequential Execution | 0/3 | Planning complete | - |
+| 2. Planner and Sequential Execution | 3/4 | Gap closure | - |
 | 3. Parallel Waves and Quality Gates | 0/? | Not started | - |
 | 4. AI Review and Audit Trail | 0/? | Not started | - |
 | 5. CLI Polish | 0/? | Not started | - |
