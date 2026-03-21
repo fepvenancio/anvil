@@ -1,8 +1,13 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
 import chalk from 'chalk';
+import { writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { loadConfig } from './core/config-loader.js';
 import { initAnvilDir } from './core/anvil-dir.js';
+import { generatePlan } from './stations/planner.js';
+import { promptPlanReview, displayPlanSummary } from './ui/plan-review.js';
+import { executeSequentially } from './orchestrator/sequential-runner.js';
 
 const program = new Command();
 
@@ -17,10 +22,11 @@ program
   .argument('<spec>', 'What to build')
   .option('-w, --workers <n>', 'Max parallel workers', '4')
   .option('-m, --model <model>', 'Claude model to use')
+  .option('--skip-review', 'Skip interactive plan review')
+  .option('--dry-run', 'Generate plan only, do not execute')
   .action(async (spec: string, opts: Record<string, string>) => {
     const config = loadConfig(opts, process.cwd());
-
-    await initAnvilDir(process.cwd());
+    const anvilDir = await initAnvilDir(process.cwd());
 
     console.log(chalk.bold('\nAnvil\n'));
     console.log(`  Project:     ${config.projectName}`);
@@ -28,6 +34,40 @@ program
     console.log(`  Max Workers: ${config.maxWorkers}`);
     console.log(`  Spec:        ${spec}`);
     console.log();
+
+    // Phase 2: Planner -> Review -> Execute pipeline
+    console.log(chalk.blue('Planning...'));
+    const plan = await generatePlan(spec, config);
+
+    // Save plan to .anvil/roadmap.json
+    await writeFile(join(anvilDir, 'roadmap.json'), JSON.stringify(plan, null, 2));
+
+    // Dry-run: display plan and exit
+    if (opts.dryRun) {
+      displayPlanSummary(plan);
+      console.log(chalk.dim('Dry run — plan saved, not executing.'));
+      return;
+    }
+
+    // Interactive review
+    const { plan: reviewedPlan, approved } = await promptPlanReview(plan, {
+      skipPrompt: !!opts.skipReview,
+    });
+    if (!approved) {
+      console.log(chalk.yellow('Build cancelled by user.'));
+      process.exit(0);
+    }
+
+    // Sequential execution
+    console.log(chalk.blue('\nExecuting plan...\n'));
+    const result = await executeSequentially(reviewedPlan, config);
+
+    if (result.success) {
+      console.log(chalk.green(`\nBuild complete! ${result.results.length} tasks executed successfully.`));
+    } else {
+      console.log(chalk.red(`\nBuild failed. ${result.failedTasks.length} task(s) failed: ${result.failedTasks.join(', ')}`));
+      process.exit(1);
+    }
   });
 
 await program.parseAsync();
