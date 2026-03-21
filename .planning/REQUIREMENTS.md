@@ -9,7 +9,7 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### CLI
 
-- [ ] **CLI-01**: User can run `anvil run "spec"` to start a full build pipeline from natural language
+- [x] **CLI-01**: User can run `anvil run "spec"` to start a full build pipeline from natural language
 - [ ] **CLI-02**: User can run `anvil status` to see the current/last build state and audit trail
 - [ ] **CLI-03**: User can run `anvil cost` to see token usage and cost breakdown per agent per wave
 - [ ] **CLI-04**: User can run `anvil logs` to view detailed build logs for any wave or task
@@ -21,7 +21,7 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **PLAN-02**: Each task in the plan declares `writes[]`, `reads[]`, and `depends_on[]`
 - [x] **PLAN-03**: Planner rejects plans with overlapping writes between tasks (merges into single task or re-plans)
 - [x] **PLAN-04**: Plan is validated against a JSON schema before execution begins
-- [ ] **PLAN-05**: Single interactive prompt after plan generation: "Review plan before starting execution? (Y/n/edit)" — 'edit' opens plan JSON in $EDITOR, re-validates on save
+- [x] **PLAN-05**: Single interactive prompt after plan generation: "Review plan before starting execution? (Y/n/edit)" — 'edit' opens plan JSON in $EDITOR, re-validates on save
 - [x] **PLAN-06**: Plan is saved to `.anvil/roadmap.json` for inspection
 
 ### Execution
@@ -116,7 +116,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CLI-01 | Phase 2 | Pending |
+| CLI-01 | Phase 2 | Complete |
 | CLI-02 | Phase 5 | Pending |
 | CLI-03 | Phase 5 | Pending |
 | CLI-04 | Phase 5 | Pending |
@@ -125,7 +125,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PLAN-02 | Phase 2 | Complete |
 | PLAN-03 | Phase 2 | Complete |
 | PLAN-04 | Phase 1 | Complete |
-| PLAN-05 | Phase 2 | Pending |
+| PLAN-05 | Phase 2 | Complete |
 | PLAN-06 | Phase 1 | Complete |
 | EXEC-01 | Phase 2 | Complete |
 | EXEC-02 | Phase 2 | Complete |

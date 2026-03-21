@@ -50,7 +50,7 @@ Plans:
 Plans:
 - [x] 02-01-PLAN.md — Planner Station with structured outputs, overlap detection, topological sort
 - [x] 02-02-PLAN.md — WorktreeManager, Worker executor, touch-map enforcement
-- [ ] 02-03-PLAN.md — Plan review UI, sequential runner, CLI pipeline wiring
+- [x] 02-03-PLAN.md — Plan review UI, sequential runner, CLI pipeline wiring
 
 ### Phase 3: Parallel Waves and Quality Gates
 **Goal**: Independent tasks execute in parallel within waves, merged between waves, with mechanical Sub-Judge checks gating progression
