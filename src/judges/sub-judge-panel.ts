@@ -5,6 +5,7 @@ import type { Task } from '../schemas/plan.js';
 import { runTscCheck } from './tsc-judge.js';
 import { runVitestCheck } from './vitest-judge.js';
 import { runTouchMapCheck } from './touch-map-judge.js';
+import { runSecurityCheck } from './security-judge.js';
 
 export async function runSubJudges(
   projectDir: string,
@@ -16,6 +17,7 @@ export async function runSubJudges(
     runTscCheck(projectDir),
     runVitestCheck(projectDir),
     runTouchMapCheck(projectDir, baselineSha, tasks),
+    runSecurityCheck(projectDir),
   ]);
 
   const report: SubJudgeReport = {

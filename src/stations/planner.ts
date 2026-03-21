@@ -3,13 +3,16 @@ import { PlanSchema, type Plan } from '../schemas/plan.js';
 import type { AnvilConfig } from '../schemas/config.js';
 import { detectWriteOverlaps } from '../core/validator.js';
 import { validateDependencyRefs } from '../core/topological-sort.js';
-import { PLANNER_SYSTEM_PROMPT } from '../prompts/planner-system.js';
+import { PLANNER_SYSTEM_PROMPT, buildPlannerPrompt } from '../prompts/planner-system.js';
+import type { StackPreset } from '../stacks/index.js';
 
 export interface GeneratePlanOptions {
   /** Maximum number of re-plan attempts on write overlap. Default: 3. */
   maxRetries?: number;
   /** Pre-parsed plan for testing (skips AI call). */
   mockPlan?: Plan;
+  /** Stack preset to inject into planner prompt. Uses default TypeScript if omitted. */
+  stack?: StackPreset;
 }
 
 /**
@@ -28,7 +31,8 @@ export async function generatePlan(
   if (options?.mockPlan) return options.mockPlan;
 
   const maxRetries = options?.maxRetries ?? 3;
-  return _generateWithRetry(config, spec, '', maxRetries);
+  const systemPrompt = options?.stack ? buildPlannerPrompt(options.stack) : PLANNER_SYSTEM_PROMPT;
+  return _generateWithRetry(config, spec, '', maxRetries, systemPrompt);
 }
 
 async function _generateWithRetry(
@@ -36,6 +40,7 @@ async function _generateWithRetry(
   spec: string,
   feedbackHistory: string,
   retriesRemaining: number,
+  systemPrompt: string = PLANNER_SYSTEM_PROMPT,
 ): Promise<Plan> {
   const prompt = `${spec}${feedbackHistory ? `\n\n## Previous Feedback\n${feedbackHistory}` : ''}
 
@@ -53,7 +58,8 @@ Schema:
       "writes": ["string (file paths this task creates/modifies)"],
       "reads": ["string (file paths this task reads for context)"],
       "dependsOn": ["string (task IDs that must complete before this one)"],
-      "acceptanceCriteria": ["string (testable conditions)"]
+      "acceptanceCriteria": ["string (testable conditions)"],
+      "exports": [{"name": "string (exported identifier)", "type": "string (TypeScript signature)"}]
     }
   ]
 }
@@ -66,7 +72,7 @@ Rules:
   const conversation = query({
     prompt,
     options: {
-      systemPrompt: PLANNER_SYSTEM_PROMPT,
+      systemPrompt,
       model: config.model,
       maxTurns: 3,
       permissionMode: 'bypassPermissions',
@@ -113,7 +119,7 @@ Rules:
 
     const feedback = `${feedbackHistory}\n\nYour plan has write overlaps that must be fixed:\n${overlapDesc}\nPlease regenerate the plan with no overlapping writes.`;
 
-    return _generateWithRetry(config, spec, feedback, retriesRemaining - 1);
+    return _generateWithRetry(config, spec, feedback, retriesRemaining - 1, systemPrompt);
   }
 
   // Check for invalid dependency references

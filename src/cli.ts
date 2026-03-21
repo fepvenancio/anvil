@@ -18,6 +18,7 @@ import { ProgressDisplay } from './ui/progress.js';
 import { statusCommand } from './cli/status.js';
 import { costCommand } from './cli/cost.js';
 import { logsCommand } from './cli/logs.js';
+import { getStackPreset, listStacks } from './stacks/index.js';
 
 const program = new Command();
 
@@ -35,20 +36,34 @@ program
   .option('--skip-review', 'Skip interactive plan review')
   .option('--dry-run', 'Generate plan only, do not execute')
   .option('--sequential', 'Use sequential execution instead of parallel waves')
+  .option('--stack <preset>', 'Stack preset (typescript, python, go, react)')
+  .option('--spec <file>', 'Read detailed spec from a file instead of CLI argument')
   .action(async (spec: string, opts: Record<string, string>) => {
     const config = loadConfig(opts, process.cwd());
     const anvilDir = await initAnvilDir(process.cwd());
+
+    // Phase 6: Read spec from file if --spec provided
+    let finalSpec = spec;
+    if (opts.spec) {
+      const { readFile } = await import('node:fs/promises');
+      const specContent = await readFile(opts.spec, 'utf-8');
+      finalSpec = specContent.trim();
+    }
+
+    // Phase 5: Resolve stack preset
+    const stack = opts.stack ? getStackPreset(opts.stack) : undefined;
 
     console.log(chalk.bold('\nAnvil\n'));
     console.log(`  Project:     ${config.projectName}`);
     console.log(`  Model:       ${config.model}`);
     console.log(`  Max Workers: ${config.maxWorkers}`);
-    console.log(`  Spec:        ${spec}`);
+    console.log(`  Stack:       ${stack?.name ?? 'typescript (default)'}`);
+    console.log(`  Spec:        ${finalSpec.length > 80 ? finalSpec.slice(0, 77) + '...' : finalSpec}`);
     console.log();
 
     // Phase 2: Planner -> Review -> Execute pipeline
     console.log(chalk.blue('Planning...'));
-    const plan = await generatePlan(spec, config);
+    const plan = await generatePlan(finalSpec, config, { stack });
 
     // Save plan to .anvil/roadmap.json
     await writeFile(join(anvilDir, 'roadmap.json'), JSON.stringify(plan, null, 2));
@@ -200,6 +215,17 @@ program
         process.exit(1);
       }
     }
+  });
+
+program
+  .command('stacks')
+  .description('List available stack presets')
+  .action(() => {
+    console.log(chalk.bold('\nAvailable Stack Presets:\n'));
+    for (const s of listStacks()) {
+      console.log(`  ${chalk.green(s.name.padEnd(12))} ${s.description}`);
+    }
+    console.log(`\nUsage: anvil run "Build X" --stack ${chalk.dim('<preset>')}\n`);
   });
 
 program.addCommand(statusCommand);

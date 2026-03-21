@@ -1,5 +1,10 @@
 import { z } from 'zod/v4';
 
+export const ExportSchema = z.object({
+  name: z.string(),
+  type: z.string(),
+});
+
 export const TaskSchema = z.object({
   id: z.string(),
   description: z.string(),
@@ -7,6 +12,7 @@ export const TaskSchema = z.object({
   reads: z.array(z.string()),
   dependsOn: z.array(z.string()),
   acceptanceCriteria: z.array(z.string()),
+  exports: z.array(ExportSchema).optional(),
 });
 
 export const PlanSchema = z.object({

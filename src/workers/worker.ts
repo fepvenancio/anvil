@@ -1,4 +1,6 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { Task } from '../schemas/plan.js';
 import type { AnvilConfig } from '../schemas/config.js';
 import { validateTouchMap } from '../git/worktree-manager.js';
@@ -32,13 +34,33 @@ export async function executeTask(
   // Build the prompt with task details
   let prompt = `## Task: ${task.description}\n\n`;
   prompt += `### Files to create/modify:\n${task.writes.map((f) => `- ${f}`).join('\n')}\n\n`;
+
+  // Phase 2: Inject actual file contents from earlier waves so workers don't guess imports
   if (task.reads.length > 0) {
-    prompt += `### Files to read for context:\n${task.reads.map((f) => `- ${f}`).join('\n')}\n\n`;
+    prompt += `### Context Files (from earlier waves — your code MUST be compatible with these):\n\n`;
+    for (const filePath of task.reads) {
+      try {
+        const contents = await readFile(join(worktreePath, filePath), 'utf-8');
+        prompt += `#### ${filePath}\n\`\`\`\n${contents}\n\`\`\`\n\n`;
+      } catch {
+        prompt += `#### ${filePath}\n*(file not yet created — will be available at runtime)*\n\n`;
+      }
+    }
   }
+
+  // Include interface contracts if defined
+  if (task.exports && task.exports.length > 0) {
+    prompt += `### Interface Contract (your exports MUST match exactly):\n`;
+    for (const exp of task.exports) {
+      prompt += `- \`${exp.name}\`: \`${exp.type}\`\n`;
+    }
+    prompt += `\n`;
+  }
+
   prompt += `### Acceptance Criteria:\n${task.acceptanceCriteria.map((c) => `- ${c}`).join('\n')}\n\n`;
   prompt += `IMPORTANT: Only create/modify the files listed above. Do not touch any other files.\n`;
   prompt += `Work in the current directory. Do not cd elsewhere.\n`;
-  prompt += `If tests are part of the acceptance criteria, run them and fix until they pass.\n`;
+  prompt += `After writing files, run \`npx tsc --noEmit\` and \`npx vitest run\` (if applicable) to verify your code compiles and tests pass. Fix any errors before finishing.\n`;
 
   try {
     const conversation = query({

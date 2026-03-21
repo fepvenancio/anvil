@@ -1,0 +1,118 @@
+import { readFile } from 'node:fs/promises';
+import { join, extname } from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import type { SubJudgeCheck } from '../schemas/reports.js';
+
+const execFileAsync = promisify(execFile);
+
+interface SecurityViolation {
+  file: string;
+  line: number;
+  rule: string;
+  snippet: string;
+}
+
+const SECURITY_RULES: Array<{
+  name: string;
+  pattern: RegExp;
+  fileExts?: string[];
+  description: string;
+}> = [
+  {
+    name: 'no-eval',
+    pattern: /\beval\s*\(|new\s+Function\s*\(/,
+    description: 'eval() or new Function() — code injection risk',
+  },
+  {
+    name: 'no-hardcoded-secrets',
+    pattern: /(?:password|secret|api_?key|token|auth)\s*[:=]\s*['"][^'"]{8,}['"]/i,
+    description: 'Hardcoded secret or API key',
+  },
+  {
+    name: 'no-sql-concat',
+    pattern: /(?:query|execute|sql)\s*\(\s*[`'"].*\$\{|(?:query|execute|sql)\s*\(\s*['"].*\+/i,
+    fileExts: ['.ts', '.js', '.mts', '.mjs'],
+    description: 'SQL string concatenation — injection risk',
+  },
+  {
+    name: 'no-innerhtml',
+    pattern: /\.innerHTML\s*=/,
+    fileExts: ['.ts', '.tsx', '.js', '.jsx', '.html'],
+    description: 'innerHTML assignment — XSS risk',
+  },
+  {
+    name: 'no-insecure-http',
+    pattern: /['"]http:\/\/(?!localhost|127\.0\.0\.1|0\.0\.0\.0)/,
+    description: 'Insecure HTTP URL (use HTTPS)',
+  },
+];
+
+/**
+ * Scan project files for common security anti-patterns.
+ * Returns a SubJudgeCheck with pass/fail and details on violations found.
+ */
+export async function runSecurityCheck(projectDir: string): Promise<SubJudgeCheck> {
+  // Get list of tracked source files
+  let files: string[];
+  try {
+    const { stdout } = await execFileAsync(
+      'git', ['ls-files', '--cached', '--others', '--exclude-standard'],
+      { cwd: projectDir, timeout: 10_000 },
+    );
+    files = stdout.trim().split('\n').filter(Boolean);
+  } catch {
+    return { name: 'security', passed: true, message: 'skipped: not a git repo or no files' };
+  }
+
+  // Filter to source files only
+  const sourceExts = new Set(['.ts', '.tsx', '.js', '.jsx', '.mts', '.mjs', '.html', '.sql']);
+  const sourceFiles = files.filter(f => sourceExts.has(extname(f)));
+
+  if (sourceFiles.length === 0) {
+    return { name: 'security', passed: true, message: 'skipped: no source files' };
+  }
+
+  const violations: SecurityViolation[] = [];
+
+  for (const file of sourceFiles) {
+    let content: string;
+    try {
+      content = await readFile(join(projectDir, file), 'utf-8');
+    } catch {
+      continue;
+    }
+
+    const lines = content.split('\n');
+    for (const rule of SECURITY_RULES) {
+      // Skip rules that don't apply to this file type
+      if (rule.fileExts && !rule.fileExts.includes(extname(file))) continue;
+
+      for (let i = 0; i < lines.length; i++) {
+        if (rule.pattern.test(lines[i])) {
+          violations.push({
+            file,
+            line: i + 1,
+            rule: rule.name,
+            snippet: lines[i].trim().slice(0, 120),
+          });
+        }
+      }
+    }
+  }
+
+  if (violations.length === 0) {
+    return { name: 'security', passed: true };
+  }
+
+  const details = violations
+    .map(v => `${v.file}:${v.line} [${v.rule}] ${v.snippet}`)
+    .join('\n');
+
+  return {
+    name: 'security',
+    passed: false,
+    message: `${violations.length} security violation(s) found`,
+    details,
+  };
+}
