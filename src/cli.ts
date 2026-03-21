@@ -9,6 +9,11 @@ import { generatePlan } from './stations/planner.js';
 import { promptPlanReview, displayPlanSummary } from './ui/plan-review.js';
 import { executeSequentially } from './orchestrator/sequential-runner.js';
 import { executeInWaves } from './orchestrator/wave-runner.js';
+import { CostTracker } from './cost/tracker.js';
+import { formatCostSummary } from './cost/display.js';
+import { runHighCourt } from './judges/high-court.js';
+import { runLibrarian } from './stations/librarian.js';
+import { simpleGit } from 'simple-git';
 
 const program = new Command();
 
@@ -72,8 +77,15 @@ program
         process.exit(1);
       }
     } else {
+      const baseDir = process.cwd();
+      const git = simpleGit(baseDir);
+      const costTracker = new CostTracker();
+
+      // Capture baseline SHA BEFORE execution (critical: HEAD moves during wave merges)
+      const baselineSha = await git.revparse(['HEAD']);
+
       console.log(chalk.blue('\nExecuting plan (parallel waves)...\n'));
-      const result = await executeInWaves(reviewedPlan, config);
+      const result = await executeInWaves(reviewedPlan, config, { costTracker });
 
       // Save judge reports
       const reportsDir = join(anvilDir, 'reports');
@@ -86,15 +98,66 @@ program
       }
 
       if (result.success) {
-        const waveCount = result.waveReports.length;
-        const taskCount = result.results.length;
-        console.log(chalk.green(`\nBuild complete! ${taskCount} tasks in ${waveCount} wave(s), all judges passed.`));
+        // --- Post-wave pipeline ---
+        console.log(chalk.blue('\nRunning High Court architectural review...\n'));
+        const highCourtReport = await runHighCourt(
+          baseDir, reviewedPlan, result.judgeReports, config,
+          { baselineSha, costTracker },
+        );
+
+        // Save High Court report
+        await writeFile(
+          join(anvilDir, 'high-court-report.json'),
+          JSON.stringify(highCourtReport, null, 2),
+        );
+
+        if (highCourtReport.verdict === 'abort' || highCourtReport.verdict === 'human_required') {
+          // EXEC-09: Rollback
+          console.log(chalk.red(`\nHigh Court verdict: ${highCourtReport.verdict}`));
+          console.log(chalk.red(`Reasoning: ${highCourtReport.reasoning}`));
+          for (const concern of highCourtReport.concerns) {
+            console.log(chalk.yellow(`  - ${concern}`));
+          }
+          console.log(chalk.red('\nRolling back to pre-build state...'));
+          await git.reset(['--hard', baselineSha]);
+          console.log(chalk.red('Rollback complete. Build artifacts removed from main.'));
+        } else {
+          // High Court approved — run Librarian
+          console.log(chalk.green(`High Court verdict: merge`));
+          console.log(chalk.blue('\nGenerating documentation...\n'));
+          const docs = await runLibrarian(
+            baseDir, reviewedPlan, highCourtReport, config,
+            { costTracker },
+          );
+
+          // LIBR-03: Atomic commit for generated docs
+          await git.add([docs.readmePath, docs.architecturePath]);
+          await git.commit('docs(anvil): auto-generated README and ARCHITECTURE');
+          console.log(chalk.green('Documentation generated and committed.'));
+
+          const waveCount = result.waveReports.length;
+          const taskCount = result.results.length;
+          console.log(chalk.green(`\nBuild complete! ${taskCount} tasks in ${waveCount} wave(s), all judges passed, High Court approved.`));
+        }
+
+        // COST-03 + COST-04: Always display and save cost report
+        const sessionId = `anvil-${Date.now()}`;
+        const costReport = costTracker.toCostReport(sessionId);
+        await writeFile(
+          join(anvilDir, 'cost-report.json'),
+          JSON.stringify(costReport, null, 2),
+        );
+        console.log('\n' + formatCostSummary(costReport));
+
+        if (highCourtReport.verdict === 'abort') {
+          process.exit(1);
+        }
       } else {
+        // Wave execution failed
         console.log(chalk.red(`\nBuild failed at wave ${result.haltedAtWave}.`));
         if (result.failedTasks.length > 0) {
           console.log(chalk.red(`  Failed tasks: ${result.failedTasks.join(', ')}`));
         }
-        // Display judge failures
         for (const report of result.judgeReports) {
           if (!report.allPassed) {
             for (const check of report.checks) {
@@ -104,6 +167,16 @@ program
             }
           }
         }
+
+        // Still save cost report on failure
+        const sessionId = `anvil-${Date.now()}`;
+        const costReport = costTracker.toCostReport(sessionId);
+        await writeFile(
+          join(anvilDir, 'cost-report.json'),
+          JSON.stringify(costReport, null, 2),
+        );
+        console.log('\n' + formatCostSummary(costReport));
+
         process.exit(1);
       }
     }
