@@ -93,6 +93,13 @@ program
       const costTracker = new CostTracker();
       const progress = new ProgressDisplay();
 
+      // Ensure repo has at least one commit (worktrees require HEAD to exist)
+      try {
+        await git.revparse(['HEAD']);
+      } catch {
+        await git.raw(['commit', '--allow-empty', '-m', 'chore: initial commit (anvil)']);
+      }
+
       // Capture baseline SHA BEFORE execution (critical: HEAD moves during wave merges)
       const baselineSha = await git.revparse(['HEAD']);
 
