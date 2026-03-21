@@ -7,7 +7,6 @@ import { topologicalWaves } from '../core/topological-sort.js';
 import { runSubJudges } from '../judges/sub-judge-panel.js';
 import pLimit from 'p-limit';
 import { simpleGit } from 'simple-git';
-import type Anthropic from '@anthropic-ai/sdk';
 import type { CostTracker } from '../cost/tracker.js';
 import { ProgressDisplay } from '../ui/progress.js';
 
@@ -36,7 +35,7 @@ export interface WaveExecutionResult {
 export async function executeInWaves(
   plan: Plan,
   config: AnvilConfig,
-  options?: { client?: Anthropic; baseDir?: string; costTracker?: CostTracker; progress?: ProgressDisplay },
+  options?: { baseDir?: string; costTracker?: CostTracker; progress?: ProgressDisplay },
 ): Promise<WaveExecutionResult> {
   const baseDir = options?.baseDir ?? process.cwd();
   const progress = options?.progress ?? new ProgressDisplay();
@@ -90,9 +89,7 @@ export async function executeInWaves(
               const wt = await worktreeManager.create(taskId);
               worktreePath = wt.worktreePath;
 
-              const result = await executeTask(task, worktreePath, config, {
-                client: options?.client,
-              });
+              const result = await executeTask(task, worktreePath, config);
               waveResults.push(result);
 
               if (result.success) {

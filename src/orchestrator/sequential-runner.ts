@@ -6,7 +6,6 @@ import { topologicalSort } from '../core/topological-sort.js';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import chalk from 'chalk';
-import type Anthropic from '@anthropic-ai/sdk';
 
 export interface ExecutionResult {
   success: boolean;
@@ -22,7 +21,7 @@ export interface ExecutionResult {
 export async function executeSequentially(
   plan: Plan,
   config: AnvilConfig,
-  options?: { client?: Anthropic; baseDir?: string },
+  options?: { baseDir?: string },
 ): Promise<ExecutionResult> {
   const baseDir = options?.baseDir ?? process.cwd();
   const worktreeManager = new WorktreeManager(baseDir);
@@ -50,9 +49,7 @@ export async function executeSequentially(
       const { worktreePath } = await worktreeManager.create(task.id);
 
       try {
-        const result = await executeTask(task, worktreePath, config, {
-          client: options?.client,
-        });
+        const result = await executeTask(task, worktreePath, config);
         results.push(result);
 
         if (result.success) {
