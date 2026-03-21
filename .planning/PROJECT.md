@@ -24,6 +24,11 @@ Target user: solo devs who loved Forge's power but hated the 40GB RAM / Docker /
 - ✓ Worker execution in isolated git worktrees with atomic commits — Phase 2
 - ✓ Touch-map enforcement: workers only modify declared files — Phase 2
 - ✓ Sequential task execution pipeline (Planner → review → execute) — Phase 2
+- ✓ Parallel wave execution with p-limit concurrency control — Phase 3
+- ✓ Topological sort wave grouping (BFS-level) — Phase 3
+- ✓ Batch merge after each wave with worktree cleanup — Phase 3
+- ✓ Sub-Judge panel: tsc, vitest, touch-map mechanical checks — Phase 3
+- ✓ Sub-Judge failure halts wave progression — Phase 3
 
 ### Active
 
@@ -116,4 +121,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-03-21 after Phase 2 completion*
+*Last updated: 2026-03-21 after Phase 3 completion*
