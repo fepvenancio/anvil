@@ -1,6 +1,6 @@
 import { simpleGit, type SimpleGit } from 'simple-git';
 import { join } from 'node:path';
-import { rm } from 'node:fs/promises';
+import { rm, writeFile, access } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 
 export class WorktreeManager {
@@ -20,6 +20,15 @@ export class WorktreeManager {
     const branch = `anvil/run-${this.runId}/task-${taskId}`;
     const worktreePath = join(this.baseDir, '.anvil', 'worktrees', `task-${taskId}`);
     await this.git.raw(['worktree', 'add', worktreePath, '-b', branch]);
+
+    // Ensure .gitignore exists so npm install / build artifacts don't get tracked
+    const gitignorePath = join(worktreePath, '.gitignore');
+    try {
+      await access(gitignorePath);
+    } catch {
+      await writeFile(gitignorePath, 'node_modules/\ndist/\n.anvil/\n*.log\n');
+    }
+
     this.activeWorktrees.set(taskId, { worktreePath, branch });
     return { worktreePath, branch };
   }

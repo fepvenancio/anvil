@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { writeFile, mkdir } from 'node:fs/promises';
+import { writeFile, mkdir, access } from 'node:fs/promises';
 import { join } from 'node:path';
 import { loadConfig } from './core/config-loader.js';
 import { initAnvilDir } from './core/anvil-dir.js';
@@ -85,6 +85,15 @@ program
       const git = simpleGit(baseDir);
       const costTracker = new CostTracker();
       const progress = new ProgressDisplay();
+
+      // Ensure .gitignore exists so npm install artifacts don't pollute git
+      const gitignorePath = join(baseDir, '.gitignore');
+      try {
+        await access(gitignorePath);
+      } catch {
+        await writeFile(gitignorePath, 'node_modules/\ndist/\n.anvil/\n*.log\n');
+        await git.add('.gitignore');
+      }
 
       // Ensure repo has at least one commit (worktrees require HEAD to exist)
       try {
