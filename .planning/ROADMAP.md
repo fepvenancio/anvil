@@ -51,7 +51,7 @@ Plans:
 - [x] 02-01-PLAN.md — Planner Station with structured outputs, overlap detection, topological sort
 - [x] 02-02-PLAN.md — WorktreeManager, Worker executor, touch-map enforcement
 - [x] 02-03-PLAN.md — Plan review UI, sequential runner, CLI pipeline wiring
-- [ ] 02-04-PLAN.md — Gap closure: full pipeline integration test (mocked LLM + real git)
+- [x] 02-04-PLAN.md — Gap closure: full pipeline integration test (mocked LLM + real git)
 
 ### Phase 3: Parallel Waves and Quality Gates
 **Goal**: Independent tasks execute in parallel within waves, merged between waves, with mechanical Sub-Judge checks gating progression
