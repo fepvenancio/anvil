@@ -29,11 +29,11 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **EXEC-01**: Each task runs in an isolated git worktree on a dedicated branch
 - [x] **EXEC-02**: Workers can only read/write files declared in their task's touch map
 - [x] **EXEC-03**: Every Worker change is an atomic git commit with a descriptive message
-- [ ] **EXEC-04**: Orchestrator performs topological sort on dependency graph to produce ordered waves
-- [ ] **EXEC-05**: Independent tasks within a wave execute in parallel (default 4 workers, configurable)
-- [ ] **EXEC-06**: After each wave completes, all worktrees are merged to main branch
-- [ ] **EXEC-07**: Worktrees are cleaned up after merge (no stale worktrees left behind)
-- [ ] **EXEC-08**: Workers that fail halt their task; the wave continues but the failed task is reported
+- [x] **EXEC-04**: Orchestrator performs topological sort on dependency graph to produce ordered waves
+- [x] **EXEC-05**: Independent tasks within a wave execute in parallel (default 4 workers, configurable)
+- [x] **EXEC-06**: After each wave completes, all worktrees are merged to main branch
+- [x] **EXEC-07**: Worktrees are cleaned up after merge (no stale worktrees left behind)
+- [x] **EXEC-08**: Workers that fail halt their task; the wave continues but the failed task is reported
 - [ ] **EXEC-09**: If High Court aborts or escalates, rollback last wave merge (git reset --hard + worktree cleanup) — bad architecture never leaks into main
 
 ### Review
@@ -130,11 +130,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | EXEC-01 | Phase 2 | Complete |
 | EXEC-02 | Phase 2 | Complete |
 | EXEC-03 | Phase 2 | Complete |
-| EXEC-04 | Phase 3 | Pending |
-| EXEC-05 | Phase 3 | Pending |
-| EXEC-06 | Phase 3 | Pending |
-| EXEC-07 | Phase 3 | Pending |
-| EXEC-08 | Phase 3 | Pending |
+| EXEC-04 | Phase 3 | Complete |
+| EXEC-05 | Phase 3 | Complete |
+| EXEC-06 | Phase 3 | Complete |
+| EXEC-07 | Phase 3 | Complete |
+| EXEC-08 | Phase 3 | Complete |
 | EXEC-09 | Phase 4 | Pending |
 | REVW-01 | Phase 3 | Complete |
 | REVW-01a | Phase 3 | Complete |
