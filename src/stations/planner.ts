@@ -112,16 +112,24 @@ Rules:
   const jsonMatch = resultText.match(/```(?:json)?\s*([\s\S]*?)```/) ?? [null, resultText];
   const jsonStr = (jsonMatch[1] ?? resultText).trim();
 
-  // Parse and validate with Zod
+  // Parse and validate with Zod — retry on invalid JSON or schema failure
   let parsed: unknown;
   try {
     parsed = JSON.parse(jsonStr);
   } catch {
-    throw new Error(`Planner returned invalid JSON: ${jsonStr.slice(0, 200)}`);
+    if (retriesRemaining <= 0) {
+      throw new Error(`Planner returned invalid JSON: ${jsonStr.slice(0, 200)}`);
+    }
+    const feedback = `${feedbackHistory}\n\nYou returned invalid JSON (not parseable). You MUST respond with ONLY a raw JSON object. No TypeScript code, no markdown, no explanation — just the JSON plan object.`;
+    return _generateWithRetry(config, spec, feedback, retriesRemaining - 1, systemPrompt);
   }
   const parseResult = PlanSchema.safeParse(parsed);
   if (!parseResult.success) {
-    throw new Error(`Planner output failed schema validation: ${parseResult.error.message}`);
+    if (retriesRemaining <= 0) {
+      throw new Error(`Planner output failed schema validation: ${parseResult.error.message}`);
+    }
+    const feedback = `${feedbackHistory}\n\nYour JSON didn't match the required schema: ${parseResult.error.message}\nPlease fix and regenerate.`;
+    return _generateWithRetry(config, spec, feedback, retriesRemaining - 1, systemPrompt);
   }
 
   const plan = parseResult.data;
