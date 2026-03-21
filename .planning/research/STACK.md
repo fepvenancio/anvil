@@ -1,275 +1,161 @@
-# Technology Stack: v1.1 Agent Backend
+# Technology Stack
 
-**Project:** Anvil - Worker Backend Delegation
-**Researched:** 2026-03-21
-**Scope:** NEW capabilities only (existing stack validated in prior milestones)
+**Project:** Anvil -- Lightweight AI Code Factory
+**Researched:** 2026-03-20
 
-## Existing Stack (DO NOT CHANGE)
+## Recommended Stack
 
-Already validated. Listed for integration context only:
+### Core Runtime
 
-| Technology | Version | Purpose |
-|------------|---------|---------|
-| TypeScript | ^5.8.0 | Language |
-| @anthropic-ai/sdk | ^0.80.0 | Planner, High Court, Librarian (structured output) |
-| commander | ^14.0.3 | CLI framework |
-| simple-git | ^3.33.0 | Git/worktree management |
-| zod | ^4.3.6 | Schema validation |
-| p-limit | ^6.2.0 | Concurrency control |
-| pino | ^9.6.0 | Logging |
+| Technology | Version | Purpose | Why | Confidence |
+|------------|---------|---------|-----|------------|
+| Node.js | >=22 LTS | Runtime | Already specified in constraints. Required for modern ESM, top-level await, native test runner fallback. Node 22 is current LTS. | HIGH |
+| TypeScript | ^5.8 | Type system | Use 5.8 (latest stable in 5.x line). TS 6.0 RC just dropped (March 2026) but is the *last* JS-based compiler -- avoid until stable. Do NOT adopt TS 7 (Go-based) yet; it is experimental. | HIGH |
 
-## Recommended New Stack
+### CLI Framework
 
-### Primary: Claude Agent SDK (TypeScript)
+| Technology | Version | Purpose | Why | Confidence |
+|------------|---------|---------|-----|------------|
+| commander | ^14.0.3 | CLI parsing | Already in package.json. 14.x is current stable (15 planned May 2026). Mature, well-typed, 121k dependents. No reason to switch. | HIGH |
 
-| Technology | Version | Purpose | Why |
-|------------|---------|---------|-----|
-| @anthropic-ai/claude-agent-sdk | latest | Claude Code worker backend | Native TypeScript SDK. In-process async generator. Returns `SDKResultMessage` with `total_cost_usd`, `usage`, and `modelUsage` per-model breakdown. No subprocess management needed. Full tool control via `allowedTools`, `systemPrompt`, `permissionMode`, `maxTurns`, `maxBudgetUsd`. This is the correct integration path -- NOT subprocess spawning. |
+### AI / LLM
 
-**Confidence:** HIGH -- verified via official Anthropic Agent SDK TypeScript reference (platform.claude.com/docs/en/agent-sdk/typescript)
+| Technology | Version | Purpose | Why | Confidence |
+|------------|---------|---------|-----|------------|
+| @anthropic-ai/sdk | ^0.80.0 | Claude API client | Official Anthropic SDK. v0.80.0 is current. Supports tool_use, structured outputs (output_config.format -- no beta header needed), extended thinking with interleaved reasoning, and streaming. Bump from ^0.32.0 in current package.json. | HIGH |
 
-#### Why the Agent SDK, not `claude -p` subprocess
+### Git Operations
 
-The Claude Code CLI (`claude -p --output-format json`) works for scripting but is inferior for Anvil's use case:
+| Technology | Version | Purpose | Why | Confidence |
+|------------|---------|---------|-----|------------|
+| simple-git | ^3.33.0 | Git worktree management, commits, merges | Already in package.json. v3.33.0 is current (published 10 days ago). Mature, typed, supports worktree add/remove/list, branch operations, merge. Sufficient for all Anvil git needs. | HIGH |
 
-1. **Agent SDK is in-process.** `query()` returns an `AsyncGenerator<SDKMessage>` -- no subprocess, no stdio parsing, no exit code handling, no shell escaping.
-2. **Structured cost reporting.** `SDKResultMessage` includes `total_cost_usd`, `usage: { input_tokens, output_tokens, cache_* }`, and `modelUsage: { [modelName]: { inputTokens, outputTokens, costUSD } }`. The CLI JSON output has similar data but requires JSON parsing of stdout.
-3. **Programmatic tool control.** `allowedTools: ["Read", "Edit", "Bash", "Glob", "Grep"]` with `permissionMode: "dontAsk"` (deny anything not pre-approved) or `"bypassPermissions"` (for trusted sandboxed execution).
-4. **CWD scoping.** `cwd` option points the agent at the worktree path. It operates on files inside the worktree, inheriting Anvil's isolation model.
-5. **Abort/budget control.** `AbortController` for cancellation, `maxTurns` and `maxBudgetUsd` for runaway protection.
-6. **System prompt injection.** `systemPrompt` replaces the default, letting Anvil inject the Worker persona and task instructions.
+### Schema Validation
 
-#### Key API Surface
+| Technology | Version | Purpose | Why | Confidence |
+|------------|---------|---------|-----|------------|
+| zod | ^4.3.6 | Runtime validation of plans, agent outputs, configs | Zod 4 is current stable. TypeScript-first with static type inference. Use at trust boundaries: LLM output parsing, plan schema validation, config loading. Generates types from schemas -- single source of truth. | HIGH |
 
-```typescript
-import { query } from "@anthropic-ai/claude-agent-sdk";
+### Database / State
 
-const q = query({
-  prompt: taskPromptString,
-  options: {
-    cwd: worktreePath,
-    systemPrompt: WORKER_SYSTEM_PROMPT_FOR_CLAUDE_CODE,
-    allowedTools: ["Read", "Edit", "Write", "Bash", "Glob", "Grep"],
-    permissionMode: "bypassPermissions",      // or "dontAsk"
-    allowDangerouslySkipPermissions: true,     // required for bypassPermissions
-    maxTurns: 30,
-    maxBudgetUsd: 2.00,
-    model: config.model,
-    settingSources: [],                         // isolation: no filesystem settings
-    persistSession: false,                      // no session persistence needed
-  }
-});
+| Technology | Version | Purpose | Why | Confidence |
+|------------|---------|---------|-----|------------|
+| better-sqlite3 | ^12.8.0 | Audit trail, cost tracking, session state | Synchronous API (perfect for CLI -- no async overhead for simple writes). v12.8.0 is current, actively maintained, supports Node 22. Native addon requires build tools but prebuilt binaries cover common platforms. | HIGH |
+| JSON files | N/A | Plan storage, config, lightweight state | For human-readable artifacts (.anvil/plan.json, config). No dependency needed -- use fs/promises + zod for validation. | HIGH |
 
-// Stream messages, collect result
-let result: SDKResultMessage;
-for await (const message of q) {
-  if (message.type === "result") {
-    result = message;
-  }
-}
+**Why better-sqlite3 over Node built-in SQLite:** Node's native sqlite module is still experimental (release candidate status, not stable). No async API. Missing features. better-sqlite3 is battle-tested with 12+ years of production use. Revisit when Node sqlite reaches stable.
 
-// result.total_cost_usd, result.usage, result.modelUsage available
-```
+### Concurrency Control
 
-#### SDKResultMessage Shape (verified)
+| Technology | Version | Purpose | Why | Confidence |
+|------------|---------|---------|-----|------------|
+| p-limit | ^6.2.0 | Parallel worker execution within waves | Lightweight (no queue abstraction needed). Anvil's wave model is simple: run N tasks concurrently, wait for all, proceed. p-limit is exactly this. 170M weekly downloads. ESM-only in v6+. | HIGH |
 
-```typescript
-type SDKResultMessage = {
-  type: "result";
-  subtype: "success" | "error_max_turns" | "error_during_execution" | "error_max_budget_usd";
-  session_id: string;
-  duration_ms: number;
-  num_turns: number;
-  result: string;
-  total_cost_usd: number;
-  usage: {
-    input_tokens: number;
-    output_tokens: number;
-    cache_creation_input_tokens: number;
-    cache_read_input_tokens: number;
-  };
-  modelUsage: {
-    [modelName: string]: {
-      inputTokens: number;
-      outputTokens: number;
-      cacheReadInputTokens: number;
-      cacheCreationInputTokens: number;
-      costUSD: number;
-    };
-  };
-  is_error: boolean;
-  errors?: string[];  // present on error subtypes
-};
-```
+### Terminal UI
 
-### Secondary: Raw SDK Adapter (existing `@anthropic-ai/sdk`)
+| Technology | Version | Purpose | Why | Confidence |
+|------------|---------|---------|-----|------------|
+| chalk | ^5.4.1 | Terminal colors | ESM-only in v5, which is fine since Anvil is ESM ("type": "module"). Widely known API, maintained. | MEDIUM |
+| ora | ^8.2.0 | Spinners for long-running operations | Elegant terminal spinners. Show worker progress, wave status, LLM calls. Works with chalk. | MEDIUM |
 
-| Technology | Version | Purpose | Why |
-|------------|---------|---------|-----|
-| @anthropic-ai/sdk | ^0.80.0 (already installed) | Fallback/legacy "sdk" backend | Preserves v1 behavior exactly. Single API call, custom tool loop, manual file I/O. No new dependency. Useful when users want minimal overhead or have API-key-only access without Claude Code installed. |
+**Alternative considered:** picocolors (7kB, CJS-only) or ansis (ESM+CJS). chalk is fine since Anvil is ESM-only and chalk's API is familiar. No need to optimize for bundle size in a CLI.
 
-This is the current `executeTask()` in `src/workers/worker.ts`. Wrap it as the `sdk` adapter with zero changes.
+### Logging
 
-### Future/Deferred: Cursor CLI Adapter
+| Technology | Version | Purpose | Why | Confidence |
+|------------|---------|---------|-----|------------|
+| pino | ^9.6.0 | Structured JSON logging to audit files | Fast, structured JSON output by default. Perfect for .anvil/logs/ audit trail. Use pino for file logging, chalk+ora for terminal output. Separate concerns: user-facing vs machine-readable. | HIGH |
 
-| Technology | Status | Interface | Why Defer |
-|------------|--------|-----------|-----------|
-| Cursor CLI | Beta (March 2026) | `cursor agent -p -m "prompt" --output-format json --force` | Viable but immature. Requires `CURSOR_API_KEY` env var. `--force` flag needed for actual file writes (without it, changes are only proposed). No documented token usage in output. stream-json events have `tool_call` tracking but no cost/usage fields. Headless mode has [known hanging issues](https://forum.cursor.com/t/cursor-agent-p-print-headless-mode-hangs-indefinitely-and-never-returns/150246). Defer to v1.2. |
+### Build Tooling
 
-**Confidence:** MEDIUM -- Cursor docs verified at cursor.com/docs/cli/headless, but the tool is explicitly beta and the API surface is still shifting.
+| Technology | Version | Purpose | Why | Confidence |
+|------------|---------|---------|-----|------------|
+| tsup | ^8.5.1 | Bundle for npm distribution | Zero-config bundler over esbuild. Produces ESM output, generates .d.ts, handles shebang for CLI bin. Note: tsup is in maintenance mode (maintainer recommends tsdown) but 8.5.1 is stable and widely used. Switch to tsdown when it matures. | MEDIUM |
+| tsx | ^4.19.0 | Dev-time execution | Already in package.json. Runs .ts files directly without build step. Keep for `npm run dev`. | HIGH |
 
-#### Cursor Integration Notes (for future reference)
+### Testing
 
-- Install: `curl -fsSL https://cursor.com/install-cli | sh`
-- Auth: `CURSOR_API_KEY` environment variable
-- Invocation: `cursor agent -p -m "<prompt>" --output-format json --force`
-- Output: NDJSON stream with `system`, `assistant`, `tool_call`, `result` events
-- Result event includes `duration_ms` but NOT token usage
-- Requires `--force` or `--yolo` for actual file modifications
-- No system prompt override flag documented
+| Technology | Version | Purpose | Why | Confidence |
+|------------|---------|---------|-----|------------|
+| vitest | ^4.1.0 | Unit and integration tests | Native TypeScript support, Jest-compatible API, fast. Vitest 4.x is current stable. Use for testing orchestration logic, plan validation, git operations (with temp dirs). | HIGH |
 
-### Future/Deferred: Aider Adapter
+### Event System
 
-| Technology | Status | Interface | Why Defer |
-|------------|--------|-----------|-----------|
-| Aider | Stable CLI, unstable scripting API | `aider -m "prompt" --yes-always --no-auto-commits --file f1 --file f2` | Python dependency (violates pure-TS constraint). No JSON output mode. No structured token/cost reporting to stdout. Exit codes undocumented. The Python scripting API (`from aider.coders import Coder`) is explicitly "not officially supported or documented, and could change." Would require subprocess + stdout scraping. Defer indefinitely or until aider adds `--output-format json`. |
+| Technology | Version | Purpose | Why | Confidence |
+|------------|---------|---------|-----|------------|
+| Node EventEmitter | built-in | Internal event bus for orchestrator | No external dependency needed. Node's built-in EventEmitter with TypeScript generics (via typed-emitter pattern or manual typing) is sufficient for wave lifecycle events, worker status updates, judge results. | HIGH |
 
-**Confidence:** HIGH that this should be deferred -- verified at aider.chat/docs/scripting.html and aider.chat/docs/config/options.html. The tool is designed for interactive use.
+## What NOT to Use
 
-## Adapter Interface Design
+| Technology | Why Not |
+|------------|---------|
+| LangChain / LangGraph | Massive dependency, Python-first mindset, unnecessary abstraction. Anvil calls Claude directly via SDK. |
+| Vercel AI SDK (@ai-sdk/*) | Adds provider abstraction Anvil doesn't need (Claude-only). Extra dependency for no benefit. |
+| Docker / containers | Explicitly out of scope. Git worktrees provide sufficient isolation. |
+| Prisma / Drizzle / any ORM | Overkill for a few audit tables. Raw better-sqlite3 with typed helpers is simpler. |
+| inquirer / prompts | Anvil is non-interactive (single command). Use commander for args, not interactive prompts. |
+| ink (React for CLI) | Over-engineered for Anvil's output needs. chalk + ora covers progress display. |
+| winston | Slower than pino, more config. Pino's JSON-by-default is better for audit logs. |
+| Node built-in sqlite | Still experimental. Not production-ready. Use better-sqlite3. |
+| TypeScript 6.0 / 7.0 | 6.0 is RC (not stable). 7.0 is Go-based experimental rewrite. Stay on 5.8. |
+| p-queue | More features than needed (priorities, pause). p-limit's simpler model fits wave execution. |
+| nanoid / uuid | Node 22 has crypto.randomUUID() built-in. No dependency needed for IDs. |
 
-No new library needed. This is a pure TypeScript interface:
+## Full Dependency List
 
-```typescript
-interface AgentAdapter {
-  readonly name: string;
-
-  execute(params: {
-    task: Task;
-    worktreePath: string;
-    config: AnvilConfig;
-    signal?: AbortSignal;
-  }): Promise<WorkerResult>;
-}
-```
-
-`WorkerResult` already exists in `src/workers/worker.ts` with the right shape:
-
-```typescript
-interface WorkerResult {
-  taskId: string;
-  success: boolean;
-  filesWritten: string[];
-  error?: string;
-  usage?: {
-    input_tokens: number;
-    output_tokens: number;
-    cache_creation_input_tokens?: number | null;
-    cache_read_input_tokens?: number | null;
-  };
-}
-```
-
-Extend with optional cost field:
-
-```typescript
-interface WorkerResult {
-  // ... existing fields ...
-  costUsd?: number;  // NEW: total cost from Agent SDK
-}
-```
-
-## Alternatives Considered
-
-| Category | Recommended | Alternative | Why Not |
-|----------|-------------|-------------|---------|
-| Claude Code integration | Agent SDK (`@anthropic-ai/claude-agent-sdk`) | CLI subprocess (`claude -p`) | SDK is in-process, typed, no shell escaping, no stdout parsing. CLI is a wrapper around the same engine. |
-| Claude Code integration | Agent SDK | `@anthropic-ai/claude-code` npm package | This package is deprecated/renamed to `@anthropic-ai/claude-agent-sdk`. |
-| Process management lib | None (use Agent SDK directly) | execa, tinyexec | Only needed for subprocess CLIs. Agent SDK is in-process. The `sdk` adapter uses the existing Anthropic SDK directly. No subprocess for either default backend. |
-| Multi-CLI orchestrator | Custom adapter interface | MCO (github.com/mco-org/mco) | MCO is an orchestration layer itself -- would conflict with Anvil's orchestrator. Anvil IS the orchestrator. |
-
-## What NOT to Add
-
-| Library | Reason to Skip |
-|---------|----------------|
-| `execa` / `tinyexec` / `cross-spawn` | No subprocess needed for the two v1.1 adapters. Agent SDK is in-process, raw SDK is already a dependency. If Cursor adapter lands in v1.2, Node.js built-in `child_process.spawn` is sufficient for a single CLI call. |
-| `tree-kill` | Already in node_modules (vitest dep). Only needed if subprocess management is added later. |
-| Docker/container libs | Explicitly out of scope per project constraints. |
-| Python / pip / venv tooling | Explicitly out of scope. Rules out Aider as a v1.1 backend. |
-| `@anthropic-ai/claude-code` | Deprecated. Use `@anthropic-ai/claude-agent-sdk` instead. |
-
-## Installation
+### Production Dependencies
 
 ```bash
-# Single new dependency for v1.1
-npm install @anthropic-ai/claude-agent-sdk
+npm install @anthropic-ai/sdk@^0.80.0 \
+  commander@^14.0.3 \
+  simple-git@^3.33.0 \
+  zod@^4.3.6 \
+  better-sqlite3@^12.8.0 \
+  p-limit@^6.2.0 \
+  chalk@^5.4.1 \
+  ora@^8.2.0 \
+  pino@^9.6.0
 ```
 
-No dev dependency changes needed.
+### Dev Dependencies
 
-## Integration Points with Existing Architecture
-
-### Worker Execution Flow (current -> new)
-
-**Current** (`src/workers/worker.ts`):
-1. Build prompt from Task
-2. Call `client.messages.create()` with WORKER_TOOLS
-3. Parse tool_use blocks, write files manually
-4. Validate touch map
-5. Return WorkerResult
-
-**New** (with adapter pattern):
-1. `wave-runner.ts` selects adapter based on `config.agent` (from `--agent` flag)
-2. Adapter receives Task + worktreePath
-3. **Claude Code adapter**: calls Agent SDK `query()`, agent reads/writes files directly in worktree via its built-in tools, returns SDKResultMessage with cost
-4. **SDK adapter**: runs current `executeTask()` logic unchanged
-5. Both return `WorkerResult` with usage data
-6. Touch map validation runs AFTER adapter completes (git diff on worktree)
-
-### Key Architectural Difference
-
-The Claude Code adapter does NOT use custom `write_file` / `report_error` tools. Instead, Claude Code has built-in `Read`, `Edit`, `Write`, `Bash`, `Glob`, `Grep` tools that operate on real files. The adapter:
-- Sets `cwd` to the worktree path
-- Lets Claude Code agent loop handle file operations natively
-- Validates touch map post-execution via git diff (existing `validateTouchMap`)
-- Extracts `filesWritten` from git status in the worktree
-
-### Config Schema Addition
-
-```typescript
-// In src/schemas/config.ts
-agent: z.enum(["claude-code", "sdk"]).default("claude-code")
+```bash
+npm install -D typescript@^5.8.0 \
+  tsx@^4.19.0 \
+  tsup@^8.5.1 \
+  vitest@^4.1.0 \
+  @types/better-sqlite3@^7.6.13 \
+  pino-pretty@^13.0.0
 ```
 
-### CLI Flag Addition
+## Version Pinning Strategy
 
-```typescript
-// In src/cli.ts
-.option("--agent <backend>", "Worker backend: claude-code (default) or sdk", "claude-code")
-```
+Use caret ranges (`^`) for all dependencies. Lock file (package-lock.json) provides reproducibility. Anvil targets `npx anvil@latest` so users always get latest compatible versions.
 
-## Agent Capability Comparison
+## ESM Strategy
 
-| Capability | Claude Code (Agent SDK) | Raw SDK |
-|------------|------------------------|---------|
-| File read | Built-in Read tool | Manual via prompt injection |
-| File write | Built-in Edit/Write tools | Custom write_file tool_use |
-| Run commands | Built-in Bash tool | Not available |
-| Multi-turn reasoning | Full agent loop (multiple turns) | Single API call |
-| Error recovery | Agent retries, self-corrects | Caller must retry |
-| Token usage | SDKResultMessage.usage | response.usage |
-| Cost tracking | SDKResultMessage.total_cost_usd | Manual calculation from usage |
-| Touch map enforcement | Post-hoc via git diff | Pre-validated via writes[] check |
-| Max budget | maxBudgetUsd option | Manual token counting |
-| Abort | AbortController | AbortController on API call |
+Anvil is ESM-only (`"type": "module"` in package.json). This aligns with:
+- chalk 5 (ESM-only)
+- p-limit 6 (ESM-only)
+- ora 8 (ESM-only)
+- Node 22 native ESM support
+- TypeScript `"module": "node16"` or `"nodenext"` in tsconfig
+
+No CJS compatibility layer needed. CLI tools don't need to support CJS consumers.
 
 ## Sources
 
-- [Claude Code headless/programmatic docs](https://code.claude.com/docs/en/headless) -- Confirmed Agent SDK is the recommended path, `-p` flag is CLI wrapper
-- [Agent SDK TypeScript reference](https://platform.claude.com/docs/en/agent-sdk/typescript) -- Full API: query(), Options, SDKResultMessage with usage/cost fields
-- [Agent SDK quickstart](https://platform.claude.com/docs/en/agent-sdk/quickstart) -- Installation, basic usage, permission modes
-- [@anthropic-ai/claude-agent-sdk on npm](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) -- Package exists, actively maintained
-- [Cursor CLI headless docs](https://cursor.com/docs/cli/headless) -- Beta status, --force flag, NDJSON output, no token reporting
-- [Cursor headless hanging bug report](https://forum.cursor.com/t/cursor-agent-p-print-headless-mode-hangs-indefinitely-and-never-returns/150246) -- Known reliability issue
-- [Aider scripting docs](https://aider.chat/docs/scripting.html) -- --message flag, Python API "not officially supported"
-- [Aider options reference](https://aider.chat/docs/config/options.html) -- --yes-always, --no-auto-commits, no JSON output
+- [@anthropic-ai/sdk on npm](https://www.npmjs.com/package/@anthropic-ai/sdk) -- v0.80.0 current
+- [simple-git on npm](https://www.npmjs.com/package/simple-git) -- v3.33.0 current
+- [commander on npm](https://www.npmjs.com/package/commander) -- v14.0.3 current
+- [better-sqlite3 on npm](https://www.npmjs.com/package/better-sqlite3) -- v12.8.0 current
+- [zod on npm](https://www.npmjs.com/package/zod) -- v4.3.6 current
+- [Zod v4 release notes](https://zod.dev/v4)
+- [p-limit on npm](https://www.npmjs.com/package/p-limit) -- 170M weekly downloads
+- [Vitest 4.0 announcement](https://www.infoq.com/news/2025/12/vitest-4-browser-mode/)
+- [TypeScript 6.0 RC announcement](https://devblogs.microsoft.com/typescript/announcing-typescript-6-0-rc/)
+- [Node.js SQLite docs](https://nodejs.org/api/sqlite.html) -- still experimental
+- [Anthropic structured outputs docs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs)
+- [tsup on npm](https://www.npmjs.com/package/tsup) -- v8.5.1, maintenance mode
+- [Ansis as chalk alternative](https://github.com/webdiscus/ansis)
+- [Pino logger](https://betterstack.com/community/guides/logging/how-to-install-setup-and-use-pino-to-log-node-js-applications/)

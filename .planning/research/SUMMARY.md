@@ -1,167 +1,181 @@
 # Project Research Summary
 
-**Project:** Anvil v1.1 — Configurable Agent Backends
-**Domain:** AI orchestration / pluggable worker execution
-**Researched:** 2026-03-21
+**Project:** Anvil -- Lightweight AI Code Factory
+**Domain:** AI Agent Orchestration CLI (multi-agent parallel code generation)
+**Researched:** 2026-03-20
 **Confidence:** HIGH
 
 ## Executive Summary
 
-Anvil v1.1 introduces a pluggable worker execution model. The existing architecture drives a single execution path: the raw Anthropic SDK makes one API call per task, manually reads files into the prompt, and parses `write_file` tool-use blocks to write files. The v1.1 milestone replaces this single path with an `AgentAdapter` interface that two backends implement — `sdk` (the current behavior, extracted and wrapped) and `claude-code` (the new default, backed by `@anthropic-ai/claude-agent-sdk`). The Claude Code backend is fundamentally different: it is a multi-turn autonomous agent with its own file tools, test-running capability, and self-correction loop. It must be isolated, constrained, and validated differently from the raw SDK backend.
+Anvil is a CLI-based multi-agent code factory that decomposes a user spec into a task DAG, executes tasks in parallel via git worktrees, and validates results through a two-tier review system (mechanical Sub-Judges + AI High Court). The expert approach in this space -- validated by Cursor's parallel agents, Forge's pipeline architecture, and emerging patterns from OpenHands and Devin -- is a pipeline-of-stations model: a Planner produces a typed plan with dependency graph and file ownership (touch maps), a Wave Scheduler groups independent tasks for parallel execution, Workers generate code in isolated worktrees, and Judges gate quality before proceeding. Anvil's key differentiator is bringing this pattern to a zero-setup `npx` CLI experience with no Docker, no Python, and no cloud account required.
 
-The recommended approach is to ship this as a clean refactor in strict dependency order: define the adapter interface first, extract the SDK adapter from existing code (zero behavior change), wire adapters into the orchestrators, then implement the Claude Code adapter, and finally augment the Planner with capability-aware task generation. Every step is independently testable and the existing behavior is preserved until the Claude Code adapter is explicitly selected. The single new npm dependency is `@anthropic-ai/claude-agent-sdk`, which provides a typed TypeScript API, structured cost reporting, and programmatic lifecycle control — eliminating any need to parse CLI subprocess output.
+The recommended approach is pure TypeScript on Node 22 LTS, using the Anthropic SDK directly (no framework abstraction), git worktrees for Worker isolation, and a strict Planner-never-codes / Worker-never-plans separation. The stack is lean: 9 production dependencies, all ESM-only, with better-sqlite3 for audit trails and JSON files for plan/state persistence. Zod 4 validates all trust boundaries (LLM output, plan schemas, config). The architecture builds bottom-up in clear dependency layers: types and infrastructure first, then stations, then orchestration, then review.
 
-The highest-severity risks are not implementation complexity risks but isolation risks: touch-map bypass (Claude Code can write anywhere in the worktree), context leakage (Claude Code reads CLAUDE.md and project settings by default), zombie subprocess accumulation across parallel workers, and cost tracking becoming a black box because CLI agents return session-aggregate costs rather than per-call costs. All five critical pitfalls have known mitigations documented in PITFALLS.md and are preventable by design choices made during the adapter interface phase. The architectural decisions to run `validateTouchMap()` in the orchestrator (not the adapter), use `settingSources: []` and `persistSession: false` in the Agent SDK, and pair `bypassPermissions` with explicit `disallowedTools` address these risks structurally.
+The primary risks are: (1) the Planner-Coder Gap -- underspecified plans cause 75% of multi-agent failures, mitigated by requiring explicit interface contracts and shared type signatures in the plan schema; (2) git worktree lifecycle mismanagement -- stale worktrees from crashed runs corrupt subsequent sessions, mitigated by a WorktreeManager with startup cleanup, PID tracking, and signal handlers; (3) token cost explosion -- parallel Workers with retry loops can spiral costs 10-25x, mitigated by real-time budget tracking with circuit breakers wired into every API call from day one. These are not theoretical -- they are the documented failure modes of every multi-agent system in production.
 
 ## Key Findings
 
 ### Recommended Stack
 
-The existing TypeScript stack (TS 5.8, `@anthropic-ai/sdk`, `commander`, `simple-git`, `zod`, `p-limit`, `pino`) requires exactly one addition: `@anthropic-ai/claude-agent-sdk`. No subprocess management library is needed because the Agent SDK is in-process. No other backends (Aider, Cursor CLI) should be added in v1.1 — Aider violates the pure-TypeScript constraint, and Cursor headless mode has documented hanging bugs and no token usage reporting.
+The stack is high-confidence across the board. All dependencies are current stable releases with active maintenance. The ESM-only strategy aligns naturally with chalk 5, p-limit 6, and ora 8.
 
 **Core technologies:**
-- `@anthropic-ai/claude-agent-sdk` (latest): Claude Code worker backend — in-process `query()` async generator, typed `SDKResultMessage` with `total_cost_usd` and `modelUsage`, programmatic `allowedTools`, `maxTurns`, `maxBudgetUsd`, `AbortController` support
-- `@anthropic-ai/sdk` ^0.80.0 (already installed): Raw SDK adapter — preserves current single-call behavior exactly, zero new dependency cost
-- All existing stack: unchanged — Planner, High Court, and Librarian remain on raw SDK for guaranteed structured output via `zodOutputFormat`; adapters are for Workers only
+- **Node.js >=22 LTS + TypeScript 5.8:** Runtime and type system. Avoid TS 6.0 (RC only) and TS 7.0 (experimental Go rewrite).
+- **@anthropic-ai/sdk ^0.80.0:** Direct Claude API access with tool_use, structured outputs, extended thinking, and streaming. No framework abstraction needed.
+- **simple-git ^3.33.0:** Git operations including worktrees (via `git.raw()` -- no native worktree methods, needs a typed wrapper).
+- **zod ^4.3.6:** Runtime validation at all trust boundaries. Single source of truth for types.
+- **better-sqlite3 ^12.8.0:** Audit trail and cost tracking. Synchronous API suits CLI patterns. Node's built-in sqlite is still experimental.
+- **p-limit ^6.2.0:** Wave-level concurrency control. Simpler than p-queue, fits the "run N, wait for all" model exactly.
+- **commander ^14.0.3:** CLI parsing. Already in package.json, no reason to change.
+- **pino ^9.6.0:** Structured JSON logging to `.anvil/logs/`. Separate from terminal output (chalk + ora).
 
-**Explicitly deferred:**
-- Cursor CLI adapter: beta status, documented hanging issues, no token usage in output — defer to v1.2
-- Aider adapter: Python dependency (violates pure-TS constraint), no JSON output mode, scripting API explicitly unsupported — defer indefinitely
+**Explicit exclusions:** LangChain/LangGraph (unnecessary abstraction), Vercel AI SDK (provider abstraction Anvil does not need), Docker (out of scope), ORMs (overkill), interactive prompts (Anvil is non-interactive).
 
 ### Expected Features
 
 **Must have (table stakes):**
-- `AgentAdapter` interface with `execute(task, worktreePath, config)` returning `AdapterResult` — the orchestrator's single integration point
-- `--agent <backend>` CLI flag defaulting to `claude-code` — required for every multi-backend tool
-- Unified cost tracking across both backends — `recordFromAdapter()` on `CostTracker` accepts aggregate usage shape; handles null costs gracefully for future opaque backends
-- Backend availability detection at startup — fail fast with actionable error if `claude` CLI is absent when `--agent claude-code` is selected
-- Worktree `cwd` passthrough — both adapters operate within the git worktree created for their task
+- Plan-then-execute architecture with visible plan before code generation
+- Parallel task execution (wave-based, not sequential)
+- Git-native workflow (every AI edit = reviewable commit)
+- Automated test/lint validation (Sub-Judges: tsc, test runner, lint)
+- Human escalation on uncertainty (PLAN_AMBIGUOUS, PLAN_GAP)
+- Cost/token tracking (per-agent, per-wave, cumulative)
+- Session state persistence with resume capability
+- Multi-file editing with dependency-aware task ordering
+- Clear CLI progress indication (wave N/M, task status, verdicts)
 
 **Should have (differentiators):**
-- Capability-aware task generation — the Planner's system prompt is augmented with the selected backend's `AgentCapabilities`, producing executable acceptance criteria (`npm test passes`) for Claude Code and structural criteria for SDK
-- Backend-specific system prompts — Claude Code workers get lean task-focused prompts; SDK workers keep the existing verbose tool-instruction prompts
-- `allowedTools` scoped per task — restrict Write/Edit to declared `writes[]` paths, allow limited Bash patterns, block all git operations via `disallowedTools`
-- `maxTurns` and `maxBudgetUsd` per task — iteration budget control for Claude Code agents
-- Post-execution `git diff --name-only` as the authoritative source of truth for `filesWritten`
+- Structured multi-judge review (Sub-Judges + High Court) -- no other CLI tool has this
+- Touch map enforcement (file ownership boundaries between parallel agents) -- unique to Anvil
+- Handoff-first review (summaries before code, cheaper and faster)
+- Zero-setup `npx anvil run` experience (no Docker, no Python, no cloud)
+- Full audit trail in `.anvil/` (human-readable, diffable JSON artifacts)
+- Ordered wave execution (more reliable than Cursor's fire-and-forget parallelism)
 
-**Defer to v1.2+:**
-- Custom adapter plugin API for third-party backends
-- Per-task backend selection or automatic backend fallback
-- Cursor CLI adapter
-- Aider adapter
-- Backend-specific configuration profiles
+**Defer to v2+:**
+- Multi-model/multi-provider support
+- MCP/A2A protocol support
+- Web UI / dashboard
+- IDE integration
+- Interactive chat mode
+- Plugin system for custom Sub-Judges
+- Configuration file (`.anvilrc`)
 
 ### Architecture Approach
 
-The adapter pattern inserts a thin interface between the wave-runner/sequential-runner orchestrators and the concrete AI execution mechanism. The key architectural insight is that the two backends represent fundamentally different execution models — not just different API shapes — so the adapter interface must be minimal (single `execute()` method), capabilities must be declared as static data objects (not methods), and all orchestrator-level concerns (git commits, touch-map validation, cost aggregation) must stay in the orchestrator and never leak into adapters.
+Anvil follows a pipeline-of-stations architecture: a single long-lived Node.js process (no servers) orchestrates Anthropic API calls and git operations through a finite state machine. Each "station" (Planner, Worker, Sub-Judge, High Court, Librarian) implements a uniform `Station<TInput, TOutput>` interface, making the pipeline composable and independently testable. State transitions are append-only snapshots to `.anvil/state.json`, enabling crash recovery. The build order is strictly layered: types/schemas (Layer 0), infrastructure wrappers (Layer 1), stations (Layer 2), orchestration (Layer 3), review (Layer 4), CLI (Layer 5).
 
 **Major components:**
-1. `src/adapters/types.ts` — `AgentAdapter` interface, `AdapterResult`, `AdapterUsage`, `AgentCapabilities` data types
-2. `src/adapters/sdk-adapter.ts` — `SdkAdapter`: verbatim extraction of current `executeTask()` from `workers/worker.ts`, zero behavior change
-3. `src/adapters/claude-code-adapter.ts` — `ClaudeCodeAdapter`: `query()` call with `cwd`, `allowedTools` scoped to `writes[]`, `disallowedTools: ['Bash(git *)']`, `settingSources: []`, `persistSession: false`, `maxTurns: 25`, `maxBudgetUsd: 2.00`
-4. `src/adapters/index.ts` — `resolveAdapter()` factory keyed on `config.agent`
-5. Updated `wave-runner.ts` / `sequential-runner.ts` — accept `adapter` via options; run `validateTouchMap()` AFTER adapter returns (defense-in-depth, adapter-agnostic)
-6. `src/prompts/planner-system.ts` — `buildCapabilitySection(capabilities)` injected into Planner system prompt at plan-generation time based on selected adapter
-
-**Invariant:** The Planner, High Court, and Librarian are explicitly excluded from the adapter system. They remain on raw SDK for structured output guarantees via `zodOutputFormat`. Adapters are for Workers only.
+1. **Orchestrator** -- State machine driving the pipeline; owns all state transitions and delegates to stations
+2. **Planner Station** -- Analyzes user spec, produces task DAG with touch maps and interface contracts
+3. **Wave Scheduler** -- Kahn's algorithm topological sort, groups independent tasks into parallel waves
+4. **Worker Pool + Workers** -- Manage concurrent Workers in isolated git worktrees (default 4 concurrent)
+5. **Merge Engine** -- Merges completed worktree branches after each wave completes
+6. **Sub-Judge Panel** -- Mechanical checks (tsc, lint, tests, touch map compliance) after each merge
+7. **High Court** -- AI architectural review using handoff-first pattern (summaries before code)
+8. **Cost Auditor** -- Real-time token/cost tracking with circuit breakers across all API calls
 
 ### Critical Pitfalls
 
-1. **Touch-map bypass** — Claude Code has unrestricted filesystem access inside the worktree. Mitigate with two layers: `allowedTools` scoped to `writes[]` paths at execution time, plus `validateTouchMap()` via `git diff` as the authoritative post-hoc check. Never trust the agent's self-reported file list.
-
-2. **Context leakage from CLAUDE.md** — Claude Code reads project configuration files automatically, which can override task instructions. Mitigate by setting `settingSources: []` in Agent SDK options, using an explicit `systemPrompt`, and sanitizing `process.env` (pass only `PATH`, `HOME`, `ANTHROPIC_API_KEY`).
-
-3. **Zombie subprocess accumulation** — Claude Code agents are long-running stateful processes. With 4 parallel workers, a parent crash leaves 4 processes burning API credits. Mitigate with `AbortController` wired into each `query()` call, a `Promise.race()` timeout wrapper (5 minutes per task), and `persistSession: false` to prevent session file accumulation.
-
-4. **Cost tracking black box** — CLI backends return session-aggregate costs, not per-call costs. Redefine the adapter contract as aggregate (`costUsd: number | null`, `inputTokens: number | null`), add `recordFromAdapter()` to `CostTracker`, display "cost unknown" for null values rather than crashing or showing $0.00.
-
-5. **Permission prompts blocking non-interactive execution** — Claude Code hangs waiting for stdin if permissions are not pre-configured. Always use `permissionMode: 'bypassPermissions'` with `allowDangerouslySkipPermissions: true` paired with explicit `disallowedTools`. Validate non-interactive execution as the first integration test for the Claude Code adapter.
+1. **Planner-Coder Gap (75% of multi-agent failures)** -- Require explicit interface contracts (TypeScript signatures) in plan schema. Validate that every cross-task dependency has a matching type contract before execution begins.
+2. **Git Worktree Lifecycle Mismanagement** -- Build a WorktreeManager with three guarantees: startup cleanup (prune stale worktrees), shutdown cleanup (graceful removal), and signal-handler cleanup (SIGTERM/SIGINT). Track worktrees in `.anvil/worktrees.json` with PIDs and timestamps.
+3. **Error Cascade Amplification Across Waves** -- Run full-project `tsc --noEmit` between waves (not just on new files). Consider a "Mini Court" fast LLM check after each wave to catch drift before it compounds.
+4. **Token Cost Explosion** -- Wire the Cost Auditor into every API call from day one with per-run budget limits (default $5), per-Worker token caps, and hard retry limits (3 max). This cannot be bolted on later.
+5. **Orphaned Child Processes** -- Use process groups, PID tracking in `.anvil/pids.json`, and AbortController for all API calls. Startup must check for and kill orphaned processes from previous runs.
 
 ## Implications for Roadmap
 
-Research identifies a strict 8-step dependency-ordered build sequence that maps cleanly to 4 phases, each leaving the system in a fully passing state.
+Based on research, suggested phase structure:
 
-### Phase 1: Adapter Interface and SDK Extraction
+### Phase 1: Foundation and Core Types
+**Rationale:** Architecture research identifies Layer 0 (types/schemas) and Layer 1 (infrastructure wrappers) as having zero internal dependencies. Everything else depends on them. Getting the Plan schema right here -- with interface contracts and touch maps baked in -- prevents Pitfall 1 from becoming systemic.
+**Delivers:** TypeScript project scaffold, all Zod schemas (Plan, Task, Wave, SessionState, Reports), config loader, logger (pino), cost tracking primitives, git wrapper (simple-git + WorktreeManager), Anthropic API wrapper with token counting and AbortController, state persistence (JSON snapshots), CLI scaffold with `run` command.
+**Addresses:** CLI framework, multi-file editing groundwork, session state persistence
+**Avoids:** Pitfall 9 (cold start DX -- bundle setup), Pitfall 12 (state corruption -- centralized writes from the start)
 
-**Rationale:** Zero behavior change, zero new dependencies. Pure TypeScript refactoring that establishes the contract every subsequent step depends on. Safest first step and unblocks all downstream work immediately.
-**Delivers:** `src/adapters/types.ts` with `AgentAdapter`, `AdapterResult`, `AdapterUsage`, `AgentCapabilities`; `SdkAdapter` class containing the verbatim body of current `executeTask()`; all existing tests pass unchanged.
-**Addresses:** Table-stakes adapter interface feature; API key routing (pitfall 11) and cost tracking contract (pitfall 2) must be designed at the interface level here.
-**Avoids:** The fat adapter interface anti-pattern — capabilities declared as data, single `execute()` method only.
+### Phase 2: Planner Station and Sequential Execution
+**Rationale:** The Planner is the highest-risk component (Pitfall 1). Building it early with rich plan validation (cycle detection, touch map consistency, interface contracts) de-risks the entire pipeline. Sequential execution (waves of 1) proves the end-to-end loop without parallelism complexity.
+**Delivers:** Planner Station (spec to typed Plan with task DAG), plan validation (cycle detection, touch map consistency), Worker Station (single worker in a git worktree, atomic commits), sequential wave execution, basic cost tracking, handoff document generation.
+**Addresses:** Plan-then-execute, git-native workflow, human escalation (PLAN_AMBIGUOUS, PLAN_GAP), dependency-aware ordering
+**Avoids:** Pitfall 1 (underspecified plans), Pitfall 13 (dependency cycles), Pitfall 8 (context exhaustion -- context budgeting in Planner)
 
-### Phase 2: Orchestrator Wiring and Config
+### Phase 3: Parallel Execution and Mechanical Quality Gates
+**Rationale:** With the single-worker loop proven, add parallelism (the core value proposition) and Sub-Judges (the quality safety net). These must be built together because Sub-Judges validate the merged output of parallel workers. Wave-level `tsc --noEmit` prevents Pitfall 3.
+**Delivers:** Wave Scheduler (Kahn's algorithm), Worker Pool with p-limit concurrency, worktree lifecycle management (create/merge/cleanup), Merge Engine, Sub-Judge Panel (tsc, test runner, touch map compliance), inter-wave coherence checks, real-time cost circuit breakers.
+**Addresses:** Parallel task execution, automated test/lint validation, touch map enforcement, cost tracking with budget limits
+**Avoids:** Pitfall 2 (worktree lifecycle), Pitfall 3 (error cascading), Pitfall 4 (orphaned processes), Pitfall 5 (cost explosion), Pitfall 7 (merge order sensitivity)
 
-**Rationale:** Connects the new interface to the execution path without touching agent backends. Makes adapter selection configurable and relocates `validateTouchMap()` from `worker.ts` into the orchestrator — where it must live for both adapters.
-**Delivers:** `--agent` CLI flag; `agent` field in `AnvilConfigSchema`; `resolveAdapter()` factory; `wave-runner` and `sequential-runner` delegating to `adapter.execute()`; `validateTouchMap()` running post-adapter in orchestrator; `CostTracker.recordFromAdapter()` method.
-**Uses:** `zod`, `commander` (already installed); no new npm dependencies.
-**Implements:** Full orchestrator wiring — selecting `--agent sdk` must be functionally identical to v1.0 behavior.
+### Phase 4: AI Review and Intelligence Layer
+**Rationale:** High Court and advanced review require all prior phases to be stable. The handoff-first pattern depends on Workers producing structured handoffs (Phase 2) and Sub-Judges providing mechanical validation (Phase 3). This phase adds the architectural judgment layer.
+**Delivers:** High Court (AI review with handoff-first + mandatory code sampling), human escalation flow (HUMAN_REQUIRED verdict), full audit trail in `.anvil/`, Librarian (auto-documentation from build artifacts).
+**Addresses:** Structured multi-judge review, handoff-first review, full audit trail, auto-documentation
+**Avoids:** Pitfall 10 (handoff blindness -- mandatory code sampling for 30% of tasks and all security-sensitive tasks)
 
-### Phase 3: Claude Code Adapter
-
-**Rationale:** First phase requiring a new npm dependency and new runtime behavior. Isolated by the adapter interface from previous phases. This is the core new capability and where all five critical pitfalls must be addressed.
-**Delivers:** `ClaudeCodeAdapter` using `@anthropic-ai/claude-agent-sdk`; `cwd` set to worktree path; `settingSources: []` and `persistSession: false` for environment isolation; `disallowedTools: ['Bash(git *)']` preventing git operations; per-task `allowedTools` scoped to `writes[]`; `AbortController` timeout wrapper; `filesWritten` derived from `git diff --name-only`.
-**Must avoid:** Context leakage (pitfall 5) — `settingSources: []` is mandatory, not optional. Zombie processes (pitfall 3) — `AbortController` and 5-minute timeout must be in place before any integration testing. Permission hangs (pitfall 9) — non-interactive execution must be the first integration test.
-**Research flag:** ARCHITECTURE.md contains a full `ClaudeCodeAdapter` implementation prototype verified against official Agent SDK docs. No additional research phase needed.
-
-### Phase 4: Capability-Aware Planning
-
-**Rationale:** Unlocks the full value of the Claude Code adapter. Without it, plans are written for a dumb single-shot executor and the capable agent is underutilized. Comes last because it requires both adapters' `AgentCapabilities` constants to be established.
-**Delivers:** `buildCapabilitySection(capabilities)` injected into Planner system prompt at plan-generation time; Claude Code plans use executable acceptance criteria (`npm test passes`, `npx tsc --noEmit exits 0`) and coarser task granularity (3-5 files); SDK plans retain exact structural criteria and fine-grained tasks (1-2 files).
-**Uses:** Static `AgentCapabilities` constants from both adapter classes; `generatePlan()` signature extended with optional `capabilities` parameter.
-**Implements:** Capability-injected Planner prompt pattern from ARCHITECTURE.md and FEATURES.md deep dive.
+### Phase 5: CLI Polish and Distribution
+**Rationale:** With the core pipeline working end-to-end with quality gates, polish the user experience. These are independent features that enhance usability without changing the core architecture.
+**Delivers:** `anvil resume`, `anvil status`, `anvil cost`, `anvil logs`, `anvil cancel`, `anvil cleanup` commands. `anvil ship --pr` (GitHub PR creation). Rich CLI progress display (ora spinners, chalk output). Graceful Ctrl+C shutdown. npx-optimized bundling with tsup. Pre-execution cost estimation with confirmation.
+**Addresses:** Session resume, clear progress indication, zero-setup npx experience
+**Avoids:** Pitfall 9 (cold start -- aggressive bundling, lazy-load heavy deps)
 
 ### Phase Ordering Rationale
 
-- Phases 1-2 preserve existing behavior throughout — the system stays shippable and all existing tests pass.
-- Phase 3 is the only phase introducing a new npm dependency and new subprocess semantics; isolating it means failures are clearly localized.
-- Phase 4 depends on Phase 3's `AgentCapabilities` constants being finalized; it cannot be accurately designed until both adapters exist.
-- All five critical pitfalls are addressed in Phase 3, where they originate. They cannot be deferred to Phase 4.
-- The Planner, High Court, and Librarian are structurally excluded from the adapter system — this constraint is load-bearing and must not be violated.
+- **Bottom-up by architecture layers:** Each phase maps to 1-2 architecture layers, ensuring no phase depends on components from a later phase.
+- **Risk-first sequencing:** The Planner (highest failure rate component) ships in Phase 2 with rich validation, not deferred. Cost circuit breakers ship in Phase 3 alongside the parallel execution that makes them necessary.
+- **Prove-then-scale pattern:** Phase 2 proves the single-worker loop. Phase 3 scales it to parallel. Phase 4 adds intelligence. This avoids debugging parallelism and AI review simultaneously.
+- **Pitfall alignment:** Every critical pitfall (1-5) is addressed in Phases 1-3, before the system is complex enough for errors to cascade.
 
 ### Research Flags
 
-All phases have well-documented patterns — no `/gsd:research-phase` needed:
-- **Phase 1:** Pure TypeScript interface design; standard adapter pattern derived directly from existing codebase types
-- **Phase 2:** All integration points specified in ARCHITECTURE.md with specific file paths and current line numbers
-- **Phase 3:** HIGH confidence from official Agent SDK TypeScript reference; full implementation prototype in ARCHITECTURE.md, verified against Agent SDK source
-- **Phase 4:** Planner prompt augmentation; clear specification with code examples in both FEATURES.md and ARCHITECTURE.md
+Phases likely needing deeper research during planning:
+- **Phase 2 (Planner Station):** The plan schema design is the highest-leverage decision in the project. Research the exact structured output format (Anthropic's `output_config.format` with Zod schema) for plan generation. Needs prompt engineering research for reliable interface contract extraction.
+- **Phase 3 (Parallel Execution):** Git worktree merge strategies when touch maps are correct but semantic conflicts exist. Research the `git merge --no-ff` vs `--squash` trade-offs for worktree branches. Process group management on macOS vs Linux.
+- **Phase 4 (High Court):** Optimal code sampling strategy for handoff-first review. How much code review is enough to catch the issues summaries miss?
+
+Phases with standard patterns (skip deep research):
+- **Phase 1 (Foundation):** Well-documented TypeScript project setup, Zod schema design, simple-git usage, pino logging. All standard patterns.
+- **Phase 5 (CLI Polish):** Commander sub-commands, ora progress display, tsup bundling. Established patterns with extensive documentation.
 
 ## Confidence Assessment
 
 | Area | Confidence | Notes |
 |------|------------|-------|
-| Stack | HIGH | Agent SDK API surface verified against official docs and npm registry; adapter interface derived directly from existing `WorkerResult` type and `executeTask()` signature |
-| Features | HIGH | Feature set tightly scoped to existing codebase; all table-stakes features derived from current `worker.ts` and `wave-runner.ts` behavior; anti-features are explicit and well-reasoned |
-| Architecture | HIGH | Integration points identified with specific file paths and line numbers in existing source; `ClaudeCodeAdapter` prototype verified against Agent SDK reference |
-| Pitfalls | HIGH | All 5 critical pitfalls have specific, actionable mitigations; sources include official Agent SDK security documentation and production-proven patterns |
+| Stack | HIGH | All dependencies verified against npm with current versions. ESM strategy validated. No speculative choices. |
+| Features | HIGH | Competitive analysis covers 8 tools. Table stakes validated against market leaders. Differentiators grounded in Forge's proven patterns. |
+| Architecture | HIGH | Pipeline-of-stations and wave-based execution are well-documented patterns. Component boundaries are clean. State machine is well-defined. |
+| Pitfalls | HIGH | Top pitfalls backed by peer-reviewed research (planner-coder gap) and documented production failures (17x error trap, cost explosion). Mitigations are specific and actionable. |
 
 **Overall confidence:** HIGH
 
 ### Gaps to Address
 
-- **`cancel()` lifecycle method:** PITFALLS.md recommends `cancel()` and `isRunning()` on the adapter interface for orchestrator-controlled shutdown; ARCHITECTURE.md's interface omits them in favor of `AbortController` passed at execution time. Resolve during Phase 1: either add lifecycle methods or document that `AbortController` is the shutdown contract.
-- **`filesWritten` accuracy:** The `ClaudeCodeAdapter` prototype sets `filesWritten: task.writes` (declared intent) rather than actual filesystem state. The post-execution `validateTouchMap()` catches violations, but `AdapterResult.filesWritten` should reflect reality. Clarify during Phase 1 whether this field is "files written" or "files declared to write."
-- **Bash allow-list exhaustiveness:** The `allowedTools` Bash patterns (`npm *`, `npx *`, `node *`, `cat *`, `ls *`) cover most cases but miss projects using `pnpm`, `yarn`, or `bun`. Acceptable as a v1.1 limitation — document it and expose `agentAllowedTools` as an optional `AnvilConfig` override.
+- **Plan schema design:** The exact JSON schema for plans (especially the `shared_interfaces` field for cross-task type contracts) needs iteration during Phase 2 implementation. Research identifies the need but not the optimal format.
+- **Worker prompt engineering:** How to structure the Worker system prompt for reliable touch map compliance and handoff document generation. Needs empirical testing.
+- **better-sqlite3 vs JSON-only for v1:** PITFALLS.md suggests JSON-only state may be simpler for v1 (avoiding native dependency for npx). STACK.md recommends better-sqlite3. Decision: use JSON for state persistence, add SQLite for audit trail queries if needed. Make SQLite optional.
+- **"Mini Court" between waves:** PITFALLS.md suggests a lightweight AI check between waves to catch error cascading. This is not in the current architecture. Evaluate during Phase 3 -- if full-project `tsc --noEmit` catches most issues, defer the Mini Court to v2.
+- **Anthropic rate limits under parallel load:** Default 4 workers = 4 concurrent API calls. Need to verify Anthropic's rate limits for the target tier and add appropriate backoff.
+- **macOS worktree behavior:** All worktree documentation focuses on Linux. Verify that `git worktree prune`, signal handling, and process groups behave identically on macOS (Anvil's primary development platform).
 
 ## Sources
 
 ### Primary (HIGH confidence)
-- [Claude Code Agent SDK TypeScript Reference](https://platform.claude.com/docs/en/agent-sdk/typescript) — `query()` API, `Options` type, `SDKResultMessage` with `usage`/`total_cost_usd`/`modelUsage`, permission modes, `settingSources`, `persistSession`
-- [Run Claude Code Programmatically](https://code.claude.com/docs/en/headless) — Agent SDK overview, headless mode, `--allowedTools` syntax, permission rule syntax
-- [@anthropic-ai/claude-agent-sdk on npm](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) — package confirmed active and installable
-- Existing Anvil source code: `src/workers/worker.ts`, `src/orchestrator/wave-runner.ts`, `src/orchestrator/sequential-runner.ts`, `src/cost/tracker.ts`, `src/schemas/config.ts`, `src/stations/planner.ts` — primary integration reference
+- [Anthropic SDK npm](https://www.npmjs.com/package/@anthropic-ai/sdk) -- v0.80.0 API surface
+- [Anthropic Structured Outputs docs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs) -- plan output format
+- [simple-git npm](https://www.npmjs.com/package/simple-git) -- v3.33.0 worktree support
+- [Zod v4 release notes](https://zod.dev/v4) -- schema validation approach
+- [The Planner-Coder Gap (arxiv:2510.10460)](https://arxiv.org/abs/2510.10460) -- 75.3% failure attribution
+- [Why Multi-Agent Systems Fail (Augment Code)](https://www.augmentcode.com/guides/why-multi-agent-llm-systems-fail-and-how-to-fix-them) -- 79% specification + coordination failures
 
 ### Secondary (MEDIUM confidence)
-- [Cursor CLI headless docs](https://cursor.com/docs/cli/headless) — beta status confirmed, no token usage, defer recommendation validated
-- [Cursor headless hanging bug report](https://forum.cursor.com/t/cursor-agent-p-print-headless-mode-hangs-indefinitely-and-never-returns/150246) — known reliability issue confirmed
-- [Aider scripting docs](https://aider.chat/docs/scripting.html) — Python-only, no JSON output, unsupported scripting API confirmed
-- [Practical Security for Sandboxing Agentic Workflows (NVIDIA)](https://developer.nvidia.com/blog/practical-security-guidance-for-sandboxing-agentic-workflows-and-managing-execution-risk/) — filesystem write restrictions as mandatory control
-- [Adapter to Actor: AI Integration Patterns](https://pasmontesinos.com/en/posts/ai-integration-patterns-adapter-actor/) — adapter pattern for LLM backends
+- [17x Error Trap (Towards Data Science)](https://towardsdatascience.com/why-your-multi-agent-system-is-failing-escaping-the-17x-error-trap-of-the-bag-of-agents/) -- error amplification patterns
+- [Git Worktrees for Parallel AI Agents (Upsun)](https://devcenter.upsun.com/posts/git-worktrees-for-parallel-ai-coding-agents/) -- worktree lifecycle patterns
+- [Cursor Parallel Agents Docs](https://cursor.com/docs/configuration/worktrees) -- competitive feature reference
+- [AI Agent Orchestration Patterns (Microsoft Azure)](https://learn.microsoft.com/en-us/azure/architecture/ai-ml/guide/ai-agent-design-patterns) -- pipeline architecture validation
+- [Best AI Coding Agents 2026 (Codegen)](https://codegen.com/blog/best-ai-coding-agents/) -- competitive landscape
 
-### Tertiary (MEDIUM confidence, inferred from patterns)
-- [Agent Design Patterns — Lance Martin](https://rlancemartin.github.io/2026/01/09/agent_design/) — planner-executor separation
-- [Google Multi-Agent Patterns in ADK](https://developers.googleblog.com/developers-guide-to-multi-agent-patterns-in-adk/) — orchestrator assigns subtasks to specialized agents
-- [Using Git Worktrees with AI Agents (Nick Mitchinson)](https://www.nrmitchi.com/2025/10/using-git-worktrees-for-multi-feature-development-with-ai-agents/) — worktree isolation patterns
+### Tertiary (LOW confidence)
+- [Hidden AI Cost Explosion (Chrono)](https://www.chronoinnovation.com/resources/hidden-cost-explosion-in-ai) -- cost scaling claims need validation against Anvil's specific usage patterns
+- [AgentFS with SQLite (Turso)](https://turso.tech/blog/agentfs-fuse) -- SQLite for agent state, tangential to Anvil's JSON-first approach
 
 ---
-*Research completed: 2026-03-21*
+*Research completed: 2026-03-20*
 *Ready for roadmap: yes*

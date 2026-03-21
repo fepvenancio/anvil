@@ -93,18 +93,6 @@ Target user: solo devs who loved Forge's power but hated the 40GB RAM / Docker /
 6. Next wave starts from updated main
 7. High Court runs once after all waves complete
 
-## Current Milestone: v1.1 Agent Backend
-
-**Goal:** Make Workers configurable executors via `--agent <backend>`. Default changes from raw SDK to Claude Code CLI. Workers are generic — they assume whatever role the task requires.
-
-**Target features:**
-- `--agent` CLI flag to select worker backend (default: `claude-code`)
-- Agent adapter interface: common contract that any CLI backend implements
-- Built-in adapters: `claude-code` (default, installed CLI), `sdk` (raw Anthropic API, v1 behavior)
-- Worker execution routed through selected adapter — same task, different executor
-- Cost tracking works regardless of backend (adapters report token usage)
-- Planner, High Court, Librarian remain on SDK (structured output requirement)
-
 ## Constraints
 
 - **Tech stack**: Pure TypeScript, Node 22+, @anthropic-ai/sdk, simple-git, commander. No Docker, no Python, no Dolt.
@@ -143,4 +131,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-03-21 after v1.1 milestone start*
+*Last updated: 2026-03-21 after Phase 5 completion — v1 milestone complete*

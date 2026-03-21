@@ -1,366 +1,363 @@
-# Pitfalls Research: Configurable CLI Agent Backends
+# Domain Pitfalls
 
-**Domain:** Adding CLI agent delegation to an existing AI orchestrator
-**Project:** Anvil v1.1 -- Agent Backend milestone
-**Researched:** 2026-03-21
-**Confidence:** HIGH
-
-This document covers pitfalls specific to replacing Anvil's direct Anthropic SDK worker calls with configurable CLI agent backends (Claude Code CLI, OpenAI Codex CLI, etc.). It does NOT repeat the general orchestration pitfalls from the v1.0 research -- those remain valid and additive.
-
----
+**Domain:** AI Agent Orchestration CLI (parallel workers, git worktrees, code review pipelines)
+**Project:** Anvil
+**Researched:** 2026-03-20
 
 ## Critical Pitfalls
 
-### Pitfall 1: Touch-Map Bypass -- CLI Agents Have Unrestricted File Access
-
-**What goes wrong:**
-Anvil's current touch-map enforcement works because Workers write files through a controlled `write_file` tool call, and the orchestrator validates `git diff --name-only` against the declared `writes[]` list after execution. When you switch to a CLI agent (Claude Code, Codex), the agent has full filesystem access inside the worktree. It can read any file, write any file, create directories, run shell commands, install packages, and modify `.gitignore` -- all without the orchestrator knowing until after the fact.
-
-The current `validateTouchMap()` in `worktree-manager.ts` runs `git diff --name-only` post-execution, which catches violations but only AFTER the agent has already done the work and burned the tokens. Worse, a clever agent might modify a file and then revert it, leaving no trace in `git diff` while having used the file's content to inform its output (information leakage across task boundaries).
-
-**Why it happens:**
-The SDK adapter controls exactly what tools the model can use -- `write_file` is a tool Anvil defines, so Anvil controls its inputs. CLI agents are opaque executors: you hand them a prompt and a working directory, and they do whatever they want inside that directory using their own built-in tools (Bash, Edit, Write, etc.).
-
-**How to avoid:**
-1. **Pre-execution filesystem scoping:** Before spawning the CLI agent, set up the worktree to contain ONLY the files in `reads[]` and empty stubs for `writes[]`. Remove or don't checkout other files. This is stronger than post-hoc validation because the agent literally cannot access files outside its declared scope.
-2. **Use `--allowedTools` restriction for Claude Code:** `claude -p "..." --allowedTools "Read,Edit,Write" --disallowedTools "Bash"` prevents shell access. For file-scoped enforcement, use the `canUseTool` callback in the TypeScript Agent SDK to inspect file paths before allowing Write/Edit operations.
-3. **For Codex CLI:** Use `sandbox_mode: "workspace-write"` with `writable_roots` configured to the worktree path only. Codex has native sandbox enforcement at the OS level (Seatbelt on macOS, seccomp on Linux).
-4. **Post-execution validation remains mandatory:** Keep the `git diff --name-only` check as a safety net, but treat it as a backstop, not the primary enforcement. Fail the task and do NOT merge on violation.
-5. **Track reads too:** Use filesystem watchers (e.g., `chokidar` on the worktree) or `strace`/`dtrace` to log which files the agent actually read. Compare against `reads[]` and flag information leakage.
-
-**Warning signs:**
-- Agent-generated code references functions or types from files not in `reads[]`
-- `git diff` shows modifications to files not in `writes[]`
-- Agent installs npm packages or modifies `package.json` when not authorized
-- Agent runs `git` commands inside the worktree (could mess with branch state)
-
-**Phase to address:**
-Adapter interface design (Phase 1). The `AgentAdapter` interface must include a `constrainFilesystem(task: Task, worktreePath: string)` method that each adapter implements differently. If this is deferred, every adapter will reinvent enforcement inconsistently.
+Mistakes that cause rewrites, runaway costs, or architectural dead ends.
 
 ---
 
-### Pitfall 2: Cost Tracking Black Box -- CLI Agents Do Not Expose Token Counts the Same Way
+### Pitfall 1: The Planner-Coder Gap (Underspecified Plans)
 
-**What goes wrong:**
-Anvil's `CostTracker` calls `recordFromResponse()` with `response.usage.input_tokens` and `response.usage.output_tokens` directly from the Anthropic SDK response object. This is a clean, synchronous, per-call extraction. CLI agents break this contract in multiple ways:
+**What goes wrong:** The Planner produces task descriptions that are ambiguous or lack critical implementation details. Workers then misinterpret requirements, generating code that technically satisfies the letter of the plan but misses the intent. Research shows the planner-coder gap accounts for 75.3% of failures in multi-agent code generation systems, with semantically equivalent inputs causing 7.9%-83.3% failure rates.
 
-- **Claude Code CLI (`-p --output-format json`):** Returns `total_cost_usd` and `usage` in the final JSON result message, but this is the AGGREGATE for the entire session, not per-API-call. A single `claude -p` invocation may make 5-15 internal API calls (agent loop with tool use), and you get one rolled-up number.
-- **Claude Code TypeScript Agent SDK:** The `SDKResultMessage` (type: "result", subtype: "success") includes `total_cost_usd`, `usage: NonNullableUsage`, and `modelUsage: { [modelName: string]: ModelUsage }`. This is richer but still session-aggregate.
-- **OpenAI Codex CLI:** Does not expose token usage in its non-interactive output at all. You must parse JSONL logs or rely on the OpenAI API dashboard.
-- **Future backends (Aider, etc.):** Each has its own cost reporting format or none at all.
+**Why it happens:** LLMs are good at high-level decomposition but struggle to specify the precise contracts between components -- expected function signatures, data shapes, error handling strategies. The Planner "thinks" in natural language while Workers need implementation-grade specificity. Information is lost at every handoff boundary.
 
-**Why it happens:**
-The SDK gives you per-message granularity because you control the conversation loop. CLI agents own their conversation loop internally -- you are a client of their session, not a participant in their message exchange.
-
-**How to avoid:**
-1. **Redefine the cost contract:** The `AgentAdapter` interface should return `{ totalCostUsd: number; inputTokens: number; outputTokens: number; model: string; turnCount: number }` as aggregate values, NOT per-call values. Accept that CLI backends give aggregate-only data.
-2. **For Claude Code specifically:** Use `--output-format json` which returns `total_cost_usd` and `usage` in the result. Parse these from stdout JSON. The `usage` field contains `input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens` as aggregates.
-3. **For the TypeScript Agent SDK route:** Iterate over `SDKMessage` events and extract `usage` from each `SDKAssistantMessage.message.usage` for per-turn granularity. This is the highest-fidelity option for Claude Code.
-4. **For backends without cost data (Codex, Aider):** The adapter must return `{ totalCostUsd: null, inputTokens: null, outputTokens: null }` with the adapter clearly flagged as "cost-opaque." The `CostTracker` must handle null costs gracefully -- display "cost unknown" for those tasks, not crash or show $0.00.
-5. **Never estimate costs from prompt length.** Agents internally compact context, use caching, retry failed calls, and spawn subagents. Your estimate will be wrong by 2-10x.
+**Consequences:** Workers produce code that compiles and passes syntax checks but has logical errors, wrong assumptions about shared interfaces, or incompatible data contracts between tasks. Sub-Judges (mechanical checks) cannot catch semantic misalignment -- only the High Court review catches it, by which point all waves have completed and the cost is sunk.
 
 **Warning signs:**
-- Cost report shows $0.00 for tasks that clearly ran
-- Cost report shows per-call numbers that are actually session aggregates (inflating the total if you sum "per-call" values that are each the session total)
-- Users on non-Claude backends see no cost data at all
+- Workers frequently trigger PLAN_GAP escalations
+- High Court repeatedly finds interface mismatches between files produced by different Workers
+- Tests pass individually per task but fail when integrated
 
-**Phase to address:**
-Adapter interface design (Phase 1) for the contract, Cost Tracker refactor (Phase 2) for the implementation. The `CostTracker.recordFromResponse()` method signature assumes SDK response shape -- it needs a new `recordFromAdapter()` method that accepts the adapter's normalized output.
+**Prevention:**
+- Planner must emit explicit interface contracts: function signatures, type definitions, and data shapes for every cross-task boundary
+- Planner's `plan.schema.json` should include a `shared_interfaces` field listing TypeScript type signatures that Workers must consume
+- Require the Planner to produce a `touch_map` that explicitly shows read/write dependencies AND the expected data contract at each boundary
+- Implement a plan validation step before Workers start: a lightweight mechanical check that every `depends_on` reference has a matching interface contract
+- Use Claude's tool_use to force structured JSON output from the Planner -- never free-text parse plan output
+
+**Detection:** Track PLAN_GAP frequency per wave. If >20% of tasks trigger PLAN_GAP in the first 3 runs, the plan schema needs richer specification fields.
+
+**Phase relevance:** Must be addressed in Planner Station design (early phase). Retrofitting richer plan schemas after Workers are built causes cascading schema changes.
+
+**Confidence:** HIGH -- backed by peer-reviewed research (arxiv:2510.10460) and directly relevant to Anvil's Planner/Worker split.
 
 ---
 
-### Pitfall 3: Subprocess Lifecycle Mismanagement -- Zombie Agents and Stuck Processes
+### Pitfall 2: Git Worktree Lifecycle Mismanagement
 
-**What goes wrong:**
-CLI agents are long-running subprocesses. A single `claude -p "implement auth middleware"` with tool use can run for 30-120 seconds. During that time: the user hits Ctrl+C, Node's event loop crashes, the machine sleeps, the network drops. The CLI agent subprocess continues running -- it has its own API connection, its own retry logic, and its own process lifecycle. With 4 parallel workers, you now have 4 zombie agent processes burning API credits.
+**What goes wrong:** Worktrees are created for each Worker task but not reliably cleaned up on failure, cancellation, or crash. Stale worktrees accumulate, branches get locked (Git enforces one-worktree-per-branch), disk usage balloons (reported: 9.82 GB in 20 minutes for a 2 GB codebase), and subsequent runs fail with cryptic Git errors about already-checked-out branches.
 
-This is worse than the v1.0 orphan process pitfall because:
-- SDK calls are stateless HTTP requests -- if the parent dies, the in-flight request eventually times out. CLI agents are stateful processes with their own agent loops that keep going.
-- CLI agents may spawn their OWN subprocesses (Claude Code runs Bash commands, linters, test suites). Killing the CLI agent process may not kill its children.
-- Claude Code specifically creates session files in `~/.claude/projects/` -- orphaned sessions pollute the user's Claude Code state.
+**Why it happens:** The happy path is easy -- create worktree, do work, merge, delete. But the unhappy paths are numerous: Worker crashes mid-task, user hits Ctrl+C, Node process gets SIGKILL, network timeout during API call, out-of-memory kill. Each failure mode leaves different cleanup debris.
 
-**Why it happens:**
-Node's `child_process.spawn()` creates a detached process by default on some platforms. `process.kill(pid)` sends SIGTERM, which the CLI agent may catch and try to "gracefully" complete its current API call before exiting (adding 10-30 seconds of extra burn). SIGKILL works but leaves Claude Code's internal state (session files, lock files) corrupted.
-
-**How to avoid:**
-1. **Use `AbortController` wired to `spawn()`:** The Claude Code TypeScript Agent SDK accepts `abortController` in options. When the orchestrator needs to cancel, call `abort()` -- this is the cleanest shutdown path because the SDK handles internal cleanup.
-2. **If using CLI subprocess (`claude -p`):** Spawn with `{ detached: false }` and store the PID. On cancellation, send SIGTERM, wait 5 seconds, then SIGKILL. Also kill the process GROUP (`process.kill(-pid)`) to catch child processes.
-3. **Implement `--max-turns` as a safety net:** Pass `--max-turns 20` (or equivalent) to prevent runaway agent loops. For the Agent SDK, use `maxTurns` in options.
-4. **Implement `--max-budget-usd` per task:** Claude Code Agent SDK supports `maxBudgetUsd` -- use it as a hard stop. Set it to `(total_run_budget / number_of_tasks) * 1.5` to allow some headroom per task while capping the total.
-5. **Timeout wrapper:** Wrap every adapter `execute()` call in a `Promise.race([execution, timeout(300_000)])`. 5 minutes per task is generous; anything longer suggests the agent is stuck.
-6. **Cleanup on startup:** Before any run, check for orphaned Claude Code sessions using `listSessions()` from the Agent SDK and warn the user. Check `.anvil/pids.json` for zombie processes from previous runs.
+**Consequences:**
+- `git worktree add` fails because branch is still checked out in a zombie worktree
+- Disk fills up on machines with limited storage (Anvil targets solo devs, not beefy CI servers)
+- `git worktree list` shows dozens of stale entries, confusing subsequent runs
+- Manual folder deletion without `git worktree remove` corrupts worktree metadata
 
 **Warning signs:**
-- `ps aux | grep claude` shows processes from hours ago
-- `.claude/projects/` has session files from Anvil-spawned agents that were never closed
-- CPU usage stays high after Anvil exits
-- Token costs on the API dashboard are higher than what Anvil's cost report shows
+- Users report "branch already checked out" errors on second run
+- Disk usage complaints
+- `git worktree list` shows entries pointing to non-existent directories
 
-**Phase to address:**
-Worker execution engine (Phase 2), when the subprocess spawning is actually implemented. The adapter interface (Phase 1) must define `cancel(): Promise<void>` and `isRunning(): boolean` methods so the orchestrator has a clean shutdown contract.
+**Prevention:**
+- Implement a WorktreeManager with three guarantees: (1) startup cleanup -- prune stale worktrees from previous crashed runs, (2) shutdown cleanup -- graceful removal on completion, (3) signal-handler cleanup -- SIGTERM/SIGINT handlers that remove worktrees before exit
+- Use a `.anvil/worktrees.json` manifest tracking active worktrees with PIDs and timestamps -- on startup, prune any entry whose PID is dead
+- Use unique branch names with run ID prefix (e.g., `anvil/run-abc123/task-1`) so stale branches from crashed runs are identifiable and batch-deletable
+- Call `git worktree prune` at the start of every `anvil run`
+- Set a worktree TTL -- if a worktree has existed for >1 hour without a commit, it is presumed stale
+
+**Detection:** Add an `anvil cleanup` command that lists and removes orphaned worktrees. Run cleanup automatically at the start of every session.
+
+**Phase relevance:** Must be rock-solid in the Worker Station implementation phase. This is infrastructure that everything else depends on.
+
+**Confidence:** HIGH -- well-documented in git worktree literature and multiple community reports.
 
 ---
 
-### Pitfall 4: Behavioral Divergence Between Backends -- Same Prompt, Different Results
+### Pitfall 3: Error Cascade Amplification Across Waves
 
-**What goes wrong:**
-The same task prompt sent to the SDK adapter, Claude Code CLI adapter, and Codex CLI adapter produces structurally different outputs. Not just different code (expected), but different FILE STRUCTURES: the SDK adapter writes exactly the files in `writes[]` because it uses the `write_file` tool you defined. Claude Code might create additional helper files, split a single file into multiple files, or restructure directories. Codex might use different naming conventions or add configuration files.
+**What goes wrong:** A subtle error in Wave 1 (wrong type exported, incorrect file path convention, bad assumption about project structure) propagates through every subsequent wave. Each wave builds on the merged output of previous waves, so a bad foundation compounds. By Wave 3, the codebase is internally inconsistent in ways that no single Sub-Judge check can diagnose because each file is locally correct.
 
-This means:
-- Touch-map enforcement fails differently per backend
-- Sub-Judges produce different results per backend
-- The Planner's plan is only valid for one backend's behavior
-- Switching backends mid-project produces inconsistent codebases
+**Why it happens:** Sub-Judges run mechanical checks (syntax, types, tests, security, touch map compliance). These are necessary but insufficient -- they verify local correctness, not cross-wave semantic coherence. The High Court only runs once at the end, which is too late to catch foundational errors cheaply. This is the "17x error trap": errors amplify across uncoordinated agent stages without feedback loops.
 
-**Why it happens:**
-Each CLI agent has its own system prompt, tool set, and behavioral patterns. Claude Code has strong opinions about file organization. Codex follows OpenAI's coding conventions. The SDK adapter follows YOUR instructions because it uses YOUR system prompt and YOUR tools. CLI agents use THEIR system prompt with your task appended.
-
-**How to avoid:**
-1. **Adapter prompt wrapping:** Each adapter's `execute()` must wrap the task prompt in backend-specific instructions that constrain output. For Claude Code: `--append-system-prompt "You MUST write ONLY to these files: [writes list]. Do NOT create additional files. Do NOT modify files not listed."` For Codex: similar constraint in the prompt.
-2. **Structural validation post-execution:** Beyond touch-map (which files were modified), validate that the EXPECTED files were created. If `writes[]` says `["src/auth.ts", "src/auth.test.ts"]` but the agent only created `src/auth.ts`, that is a failure.
-3. **Normalize adapter output:** The `AgentAdapter.execute()` return type must include `{ filesWritten: string[], filesRead: string[] }` verified against actual filesystem state, not self-reported by the agent.
-4. **Do NOT try to make backends behave identically.** Accept behavioral differences and enforce constraints at the orchestrator level (touch-map, structural validation, Sub-Judges). The adapter's job is to translate the task into backend-specific execution, not to make all backends identical.
-5. **Integration test suite per adapter:** A standard set of tasks (create a file, modify a file, create multiple files) that each adapter must pass. Run on CI. This catches regressions when backends update.
+**Consequences:**
+- High Court aborts the entire build after all waves complete, wasting 100% of compute
+- Workers in later waves produce correct code that is incompatible with the (flawed) foundation
+- Retry loops burn tokens rebuilding everything from scratch
 
 **Warning signs:**
-- Switching `--agent` flag produces different Sub-Judge results for the same plan
-- Touch-map violations spike when using a non-SDK backend
-- Workers create unexpected files that pollute subsequent waves
+- Sub-Judges pass every wave but High Court consistently aborts
+- Type errors only surface during final merge
+- Workers in later waves report unexpected file contents (from earlier waves)
 
-**Phase to address:**
-Adapter implementation (Phase 2-3, one per backend). The adapter interface (Phase 1) must define the structural validation contract. Testing (Phase 4) must include cross-adapter comparison tests.
+**Prevention:**
+- Add a full-project coherence check between waves: after merging Wave N, run `tsc --noEmit` on the full project (not just the new files) before starting Wave N+1
+- Consider a "Mini Court" after each wave -- not the full High Court, but a fast LLM check that reads the wave's handoff summaries against the original plan and flags drift
+- Make Sub-Judges wave-aware: they should check not just "does this file compile" but "does this file's exported interface match what the plan said it would export"
+- Implement an early-abort threshold: if Sub-Judges report >N warnings in a wave, pause and escalate rather than continuing
+
+**Detection:** Track Sub-Judge pass rates across waves. A pattern of "all pass" in early waves followed by High Court abort indicates cascade amplification.
+
+**Phase relevance:** Sub-Judge and wave execution design. The temptation will be to ship basic Sub-Judges first and "add smarter checks later" -- but by then the wave execution loop is locked in and adding inter-wave checks requires refactoring the orchestration loop.
+
+**Confidence:** HIGH -- "17x error trap" is documented in multi-agent literature; directly maps to Anvil's wave architecture.
 
 ---
 
-### Pitfall 5: Leaking Orchestrator Context Into Agent Sessions
+### Pitfall 4: Orphaned Child Processes and Resource Leaks
 
-**What goes wrong:**
-Claude Code and Codex both read project-level configuration files automatically: `CLAUDE.md`, `.claude/settings.json`, `codex.toml`, etc. When Anvil spawns a CLI agent in a worktree, the agent picks up the HOST PROJECT's configuration (Anvil's own `CLAUDE.md`, if present) and follows those instructions instead of (or in addition to) the task-specific instructions from the Planner.
+**What goes wrong:** Anvil spawns parallel Worker processes (or at minimum parallel Anthropic API calls). If the parent orchestrator dies (SIGKILL, OOM, crash), child processes and API connections continue running. Workers keep generating code, burning tokens, and writing to worktrees -- but nobody is collecting the results.
 
-Worse: if the user's project has its own `CLAUDE.md` with rules like "never modify files in src/core/", the agent follows those rules even when the Planner explicitly assigned it to modify `src/core/auth.ts`.
+**Why it happens:** Node.js child processes do NOT automatically die when their parent exits. SIGKILL cannot be caught, so graceful shutdown handlers never fire. If Workers are implemented as `child_process.spawn()` or `child_process.fork()`, they become orphaned processes adopted by PID 1. Even if Workers are async functions in the same process, dangling API connections and file handles persist.
 
-**Why it happens:**
-CLI agents walk up the directory tree looking for configuration. A worktree is a real git checkout in a real directory -- it inherits the project's configuration files. The Claude Code Agent SDK defaults to NOT loading filesystem settings (`settingSources` defaults to `[]`), but the CLI (`claude -p`) DOES load them unless told not to.
-
-**How to avoid:**
-1. **For the TypeScript Agent SDK:** Explicitly set `settingSources: []` to prevent loading any filesystem settings. Set `systemPrompt` explicitly to your worker prompt. This is the cleanest solution.
-2. **For CLI subprocess (`claude -p`):** Use `--system-prompt` to fully replace the default prompt (not `--append-system-prompt` which adds to it). This overrides CLAUDE.md loading.
-3. **For Codex CLI:** Set `CODEX_DISABLE_PROJECT_CONFIG=1` (if available) or create a minimal `codex.toml` in the worktree root that overrides the project config.
-4. **Worktree sanitization:** Before spawning the agent, remove or rename any agent configuration files (`.claude/`, `CLAUDE.md`, `.codex/`, `codex.toml`) from the worktree. Restore them after execution. This is crude but reliable.
-5. **Environment variable isolation:** Spawn agents with a clean env that only contains required variables (`ANTHROPIC_API_KEY`, `PATH`, `HOME`). Do NOT inherit the full `process.env` -- it may contain `CLAUDE_*` variables that alter behavior.
+**Consequences:**
+- Token cost continues accumulating with no useful output
+- Worktrees are modified by zombie Workers, corrupting state for the next run
+- On resource-constrained machines (target: solo devs), 4+ orphaned Worker processes can make the machine unresponsive
+- Users see mysterious `.anvil/` state that doesn't match what they think happened
 
 **Warning signs:**
-- Agent ignores task instructions in favor of project-level CLAUDE.md rules
-- Agent behavior changes when the user adds/modifies their CLAUDE.md
-- Agent loads MCP servers configured in the user's global Claude settings
-- Different results on different developers' machines due to different global settings
+- Token costs higher than expected after cancelled runs
+- `ps aux | grep anvil` shows processes from previous sessions
+- Worktree files modified after `anvil cancel` was run
 
-**Phase to address:**
-Adapter interface design (Phase 1) must specify that adapters are responsible for environment isolation. Adapter implementation (Phase 2-3) must implement it per-backend.
+**Prevention:**
+- Write the orchestrator PID and all child PIDs to `.anvil/pids.json` at startup
+- On startup, check for and kill any processes from `.anvil/pids.json` that are still running
+- Use process groups (`detached: false` + `process.kill(-pid)`) so killing the group kills all children
+- Implement AbortController for all Anthropic API calls, wired to the orchestrator's shutdown signal
+- Add a heartbeat: Workers check every 30s that the orchestrator is still alive; if not, self-terminate
+- For `anvil cancel`: send SIGTERM to process group, wait 5s, then SIGKILL
+
+**Detection:** `anvil status` should always check for orphaned processes and warn the user.
+
+**Phase relevance:** Orchestrator/Worker process model design. Must be decided before Workers are implemented because it affects whether Workers are child processes, worker threads, or async functions.
+
+**Confidence:** HIGH -- standard Node.js process management concern, well-documented.
+
+---
+
+### Pitfall 5: Token Cost Explosion Without Circuit Breakers
+
+**What goes wrong:** A single `anvil run` with 4 parallel Workers across 3 waves can make 50+ API calls to Claude. If the Planner produces an overly ambitious plan (too many tasks) or Workers enter retry loops (code doesn't compile, fix, recompile, still broken), token costs can spiral from an expected $2 to $50+ in a single run. Solo devs discover this on their credit card statement.
+
+**Why it happens:** Multi-agent token consumption scales super-linearly: each Worker independently explores its context, backtracks, and retries. Retry loops are especially dangerous -- a Worker that can't get `tsc` to pass will keep iterating, each attempt consuming the full context window. Research shows production multi-agent costs can be 2-3x test costs, with agentic tokens consuming 100x more than simple prompting.
+
+**Consequences:**
+- Users abandon the tool after one expensive run
+- Trust is destroyed -- users need confidence that `anvil run` won't drain their API balance
+- Retry loops produce diminishing returns: if the first 3 attempts failed, attempt 4-10 probably will too
+
+**Warning signs:**
+- Any single Worker consuming >50K output tokens
+- Total run cost exceeding 3x the estimated cost
+- Workers making >3 attempts at the same sub-task
+
+**Prevention:**
+- Implement per-run budget limits (default: $5, configurable with `--budget`)
+- Implement per-Worker token limits (max output tokens per task)
+- Hard cap on Worker retry attempts: 3 retries max, then PLAN_GAP escalation
+- Cost Auditor must be real-time, not post-hoc: track running totals and pause the run if approaching budget
+- Display estimated cost BEFORE execution starts (based on plan complexity) with user confirmation for runs estimated above threshold
+- Show live cost ticker during execution (`anvil status` or inline output)
+
+**Detection:** Cost Auditor reports after every wave. Alert immediately if any wave exceeds 50% of total budget.
+
+**Phase relevance:** Must be designed into the orchestrator from day one. The Cost Auditor cannot be a bolt-on -- it needs hooks into every API call.
+
+**Confidence:** HIGH -- token cost explosion is the number one complaint in multi-agent system deployments.
 
 ---
 
 ## Moderate Pitfalls
 
-### Pitfall 6: Streaming Output Parsing Fragility
+---
 
-**What goes wrong:**
-When using `claude -p --output-format stream-json`, output is newline-delimited JSON. But CLI subprocesses do not guarantee clean line boundaries in stdout -- buffers can split mid-JSON-object, especially under high CPU load when 4 agents run in parallel. Naive `readline`-based parsing produces `SyntaxError: Unexpected end of JSON input` intermittently.
+### Pitfall 6: Touch Map Enforcement Gaps
 
-**How to avoid:**
-- Use the TypeScript Agent SDK (`@anthropic-ai/claude-agent-sdk`) instead of raw CLI subprocess for Claude Code. The SDK handles streaming internally and provides typed `SDKMessage` objects via an async generator. This eliminates stdout parsing entirely.
-- If you must use CLI subprocess: buffer stdout, split on `\n`, attempt `JSON.parse()` on each line, and concatenate incomplete lines with the next chunk before retrying. Use a proven NDJSON parser like `ndjson` or `split2`.
-- For `--output-format json` (non-streaming): wait for process exit, then parse the complete stdout as JSON. Simpler but no progress feedback during execution.
+**What goes wrong:** The Planner declares which files each Worker can read/write (touch map). But enforcement is harder than it sounds: Workers can instruct the LLM to generate code that imports from files not in their read list, or write to paths using dynamic string construction that bypasses static path checks.
 
-**Warning signs:**
-- Intermittent JSON parse errors that don't reproduce consistently
-- Missing cost data because the final result message was truncated
+**Prevention:**
+- Enforce touch maps at the git level: after Worker completes, `git diff --name-only` against the worktree and reject any file not in the touch map's write list
+- Validate imports/requires in generated code against the read list (AST-level check or simple regex for TypeScript imports)
+- Fail hard on touch map violations -- do not merge the Worker's output, trigger PLAN_GAP instead
+- Consider filesystem-level enforcement: create worktrees with only declared read files symlinked in
 
-**Phase to address:**
-Adapter implementation for Claude Code (Phase 2). Prefer the Agent SDK over raw CLI to avoid this entirely.
+**Warning signs:** High Court finds files modified that weren't in any task's write list. Workers importing modules they shouldn't know about.
+
+**Phase relevance:** Worker Station implementation. Easier to enforce strictly from the start than to tighten later.
+
+**Confidence:** MEDIUM -- Forge had this mechanism; the risk is in the TypeScript reimplementation missing edge cases.
 
 ---
 
-### Pitfall 7: Agent Version Drift Breaking Adapter Contracts
+### Pitfall 7: Merge Order Sensitivity Within Waves
 
-**What goes wrong:**
-Claude Code CLI updates automatically (it is an npm package that checks for updates). A new version may change: JSON output fields, CLI flag behavior, default tool permissions, error message format, or session file structure. Your adapter, tested against Claude Code v2.1.x, breaks silently on v2.2.x because a field was renamed or a default changed.
+**What goes wrong:** Within a wave, all Workers operate in parallel on separate worktrees. After the wave completes, worktrees must be merged back to main. If the Planner allowed overlapping reads (Worker A reads file X, Worker B also reads file X but writes file Y that imports from X), the merge order can matter even when there are no textual conflicts. Worker B's code may depend on the pre-wave version of X, but Worker A modified X.
 
-Codex CLI has the same issue -- it ships frequent updates with potentially breaking changes to its `exec` mode output format.
+**Prevention:**
+- Anvil's design already prohibits overlapping writes (good), but overlapping reads with writes must also be checked
+- The Planner's dependency graph should flag any task that reads a file another task writes as a dependency (not parallelizable)
+- After merge, re-run `tsc --noEmit` to catch interface breaks that Git's textual merge missed
+- Merge in deterministic order (by task ID) so results are reproducible even if order-sensitive
 
-**How to avoid:**
-1. **Pin CLI versions in documentation and CI.** Tell users: "Anvil v1.1 is tested with Claude Code >= 2.1.70." Check the version at startup (`claude --version`) and warn if it is outside the tested range.
-2. **Defensive parsing:** Never destructure agent output with `const { result, usage, cost_usd } = output`. Always use optional chaining and default values: `output?.usage?.input_tokens ?? null`. Validate output against a Zod schema before using it.
-3. **For the Agent SDK:** Pin the npm package version in `package.json`. The SDK versioning is more stable than the CLI because it is a library dependency you control.
-4. **Version-gated adapters:** The adapter can check `claude --version` and use different parsing logic for different versions. But keep this simple -- support at most 2 major versions.
+**Warning signs:** Successful git merge (no textual conflicts) followed by type errors or test failures.
 
-**Warning signs:**
-- Adapter tests pass locally but fail in CI (different CLI version)
-- Users report "cost tracking stopped working" after a Claude Code update
-- JSON parse errors on fields that used to exist
+**Phase relevance:** Planner Station (dependency graph generation) and wave execution (merge strategy).
 
-**Phase to address:**
-Adapter implementation (Phase 2-3). Add version detection to the adapter initialization and include version in error messages for debugging.
+**Confidence:** MEDIUM -- inherent to the wave architecture design, but preventable with correct dependency analysis.
 
 ---
 
-### Pitfall 8: Working Directory Confusion in Worktrees
+### Pitfall 8: Context Window Exhaustion in Workers
 
-**What goes wrong:**
-CLI agents resolve relative paths from their working directory. If the adapter spawns `claude -p` with `cwd: worktreePath`, the agent operates relative to the worktree root -- correct. But if the agent runs a shell command (e.g., `npm test`), that command inherits the cwd -- also correct. The problem arises when:
-- The agent references the MAIN repo path (from env vars, cached paths, or resolved symlinks)
-- The agent runs `git` commands that operate on the main repo instead of the worktree
-- Package managers (`npm`, `pnpm`) resolve the lockfile from the root repo, not the worktree
-- Path resolution differs between macOS (case-insensitive, symlink resolution) and Linux
+**What goes wrong:** Workers operating on large or growing codebases need to read existing files (from their read list) plus generate new code. If a task requires reading 10 files of 500 lines each, plus generating a complex implementation, the context window fills up. The Worker starts "forgetting" earlier file contents, producing code with wrong import paths, missing function parameters, or inconsistent type usage -- the "lost in the middle" problem.
 
-**How to avoid:**
-- Always set `cwd` explicitly when spawning agents. For the Agent SDK: `options.cwd = worktreePath`. For CLI: `spawn('claude', args, { cwd: worktreePath })`.
-- Sanitize environment variables: unset `GIT_DIR`, `GIT_WORK_TREE`, `npm_config_prefix`, and any path variables that reference the main repo.
-- Test with both absolute and relative paths in task file references.
+**Prevention:**
+- Planner should estimate context budget per task: sum of read file sizes + expected output size must fit within 80% of context window
+- If a task's context budget exceeds limits, Planner must decompose further or the orchestrator must use file summarization (read only interfaces/type signatures, not full implementations)
+- Workers should receive files in dependency order (most-depended-on first) so the most critical context is in the "attention-rich" beginning of the prompt
+- Use extended thinking to offload reasoning from the main context window
 
-**Warning signs:**
-- Agent modifies files in the main repo instead of the worktree
-- `git status` in the agent shows different results than expected
-- npm commands fail with "lockfile mismatch" errors
+**Warning signs:** Workers produce code that references wrong function signatures from files they were given. Import paths that don't match actual file locations.
 
-**Phase to address:**
-Adapter implementation (Phase 2). Include a worktree-specific test that verifies file operations stay within the worktree.
+**Phase relevance:** Planner Station (task sizing) and Worker Station (prompt construction).
+
+**Confidence:** HIGH -- "lost in the middle" problem is well-documented for long contexts.
 
 ---
 
-### Pitfall 9: Permission Prompts Blocking Non-Interactive Execution
+### Pitfall 9: npx Cold Start and Dependency Weight
 
-**What goes wrong:**
-CLI agents have permission systems. Claude Code prompts for permission before running Bash commands, editing files outside the project, or using certain tools. Codex has approval policies. If the adapter does not configure permissions correctly, the agent blocks waiting for user input on stdin -- which never comes because it is running non-interactively as a subprocess. The process hangs indefinitely.
+**What goes wrong:** Anvil targets `npx anvil@latest run "..."` as the zero-setup entry point. But npx downloads the package fresh each time (unless cached), and if Anvil has heavy dependencies (better-sqlite3 requires native compilation, large SDK bundles), the first-run experience is 30-60 seconds of "installing dependencies" before anything happens. Users think it is broken.
 
-**How to avoid:**
-- **Claude Code Agent SDK:** Use `permissionMode: 'bypassPermissions'` with `allowDangerouslySkipPermissions: true`. OR use `permissionMode: 'dontAsk'` with `allowedTools` pre-configured to include all tools the agent needs, and `disallowedTools` for tools it should never use.
-- **Claude Code CLI:** Use `--allowedTools "Read,Write,Edit,Bash"` to pre-approve tools. Be specific with Bash patterns: `--allowedTools "Bash(npm test *),Bash(tsc *)"` to allow only specific commands.
-- **Codex CLI:** Use `--full-auto` which sets `approval_policy: "on-request"` with workspace-write sandbox, or `--approval-policy never` for full automation.
-- **Never** use `bypassPermissions` without also restricting tools via `disallowedTools`. Bypassing permissions AND allowing all tools means the agent can do anything on the machine.
+**Prevention:**
+- Keep the dependency tree minimal and avoid native modules where possible (use sql.js or JSON-only state instead of better-sqlite3 for zero native compilation)
+- Lazy-load heavy dependencies (Anthropic SDK, git libraries) so the CLI responds instantly with a progress indicator
+- Bundle with tsup/esbuild to ship a single file, avoiding npx dependency resolution overhead
+- Display a clear "First run: downloading..." message immediately so users know it is working
+- Consider making SQLite optional -- JSON-only for simple runs, SQLite for audit-heavy usage
 
-**Warning signs:**
-- Agent processes hang with 0% CPU usage (waiting for stdin)
-- Adapter timeouts trigger on every task
-- Works in development (where terminal is attached) but fails in CI/automation
+**Warning signs:** First-run takes >10 seconds. Users file issues saying "npx anvil hangs."
 
-**Phase to address:**
-Adapter implementation (Phase 2). This MUST be validated in the first integration test for each adapter. A non-interactive test that runs a simple file-creation task end-to-end.
+**Phase relevance:** CLI scaffold and packaging phase (first phase). DX decisions here set user expectations permanently.
+
+**Confidence:** MEDIUM -- standard CLI distribution concern, well-understood mitigation strategies.
+
+---
+
+### Pitfall 10: Handoff-First Review Blindness in High Court
+
+**What goes wrong:** The High Court reads Worker handoff summaries first, diving into code only on escalation. This is efficient but creates a vulnerability: if a Worker's summary is confidently wrong ("Implemented auth middleware with JWT validation" when the code actually has a critical security flaw), the High Court may accept it without code review. LLMs are excellent at producing convincing summaries of flawed work.
+
+**Prevention:**
+- High Court should always sample-check code for a random subset of tasks (e.g., 30%), regardless of handoff confidence
+- Require handoff summaries to include specific, verifiable claims: "Function `validateToken` at line 42 of `auth.ts` checks expiry" -- the High Court can then spot-check these specific claims against actual code
+- Sub-Judges should include a "summary accuracy" check: does the handoff summary's claimed file list match the actual `git diff`?
+- For security-sensitive tasks (auth, data access, API keys), always escalate to full code review regardless of handoff quality
+
+**Warning signs:** High Court merge rate is suspiciously high (>90%). Post-merge bugs that should have been caught in review.
+
+**Phase relevance:** High Court implementation and handoff schema design.
+
+**Confidence:** MEDIUM -- logical extrapolation from Forge's handoff-first model. The attack vector is clear even without direct failure data.
 
 ---
 
 ## Minor Pitfalls
 
-### Pitfall 10: Session File Pollution
+---
 
-**What goes wrong:**
-Claude Code creates session JSONL files in `~/.claude/projects/<project-hash>/`. Each Anvil worker task spawns a new Claude Code session. A plan with 12 tasks across 3 waves creates 12 session files. Over multiple runs, hundreds of session files accumulate, consuming disk space and slowing Claude Code's session listing.
+### Pitfall 11: simple-git Library Limitations for Worktree Operations
 
-**How to avoid:**
-- Use `persistSession: false` in the Agent SDK options to disable session persistence.
-- For CLI: sessions are always persisted. Accept this and document it as a known side effect. Users can clean up with `claude sessions --delete`.
-- Consider using a single Claude Code session per wave (continuing with `--resume`) instead of one per task, reducing session count by the parallelism factor.
+**What goes wrong:** Anvil's stack specifies `simple-git` for Git operations. However, simple-git has limited native worktree support -- it lacks dedicated methods for `git worktree add`, `git worktree remove`, `git worktree list`, and `git worktree prune`. You end up calling `git.raw()` for all worktree operations, losing type safety and error handling benefits.
 
-**Phase to address:**
-Adapter implementation (Phase 2). Low priority but should be documented.
+**Prevention:**
+- Build a thin `WorktreeManager` abstraction early that wraps `git.raw()` calls with proper TypeScript typing and error handling
+- Alternatively, use `execa` or Node's `child_process.execFile` directly for worktree operations and `simple-git` for standard git operations (status, add, commit, merge)
+- Write integration tests for worktree operations against a real git repo in temp directories
+
+**Phase relevance:** Worker Station foundation phase.
+
+**Confidence:** MEDIUM -- based on simple-git docs showing no dedicated worktree API.
 
 ---
 
-### Pitfall 11: API Key Routing Confusion
+### Pitfall 12: State File Corruption Under Concurrent Writes
 
-**What goes wrong:**
-Anvil passes the `ANTHROPIC_API_KEY` to the SDK adapter via the `Anthropic()` client constructor. CLI agents discover API keys differently: Claude Code checks `~/.claude/credentials`, environment variables, and OAuth tokens. Codex uses `OPENAI_API_KEY`. If the user has Claude Code configured with a different API key (e.g., a personal key) than the one Anvil is configured with (e.g., a project key), the cost shows up on the wrong account, rate limits differ, and model access may differ.
+**What goes wrong:** Multiple Workers completing simultaneously attempt to update `.anvil/state.json` or the audit log. Without file locking or a write-through queue, concurrent writes produce corrupted JSON or lost updates.
 
-**How to avoid:**
-- Explicitly pass the API key via environment variable when spawning agents: `spawn('claude', args, { env: { ...minimalEnv, ANTHROPIC_API_KEY: config.apiKey } })`.
-- For the Agent SDK: set `env: { ANTHROPIC_API_KEY: config.apiKey }` in options to override any ambient credentials.
-- For Codex: set `OPENAI_API_KEY` in the spawn environment.
-- Document that Anvil uses its own API key configuration, not the user's global agent credentials.
+**Prevention:**
+- Centralize all state writes through the orchestrator process -- Workers report completion to the orchestrator via IPC or promise resolution, and only the orchestrator writes state files
+- If using SQLite, it handles its own locking (with WAL mode for concurrent reads)
+- Never let Workers write to shared state files directly
 
-**Phase to address:**
-Adapter interface design (Phase 1) -- the adapter must accept an API key and forward it to the backend.
+**Phase relevance:** Orchestrator and state management design.
+
+**Confidence:** HIGH -- standard concurrent file access concern.
 
 ---
 
-## Technical Debt Patterns
+### Pitfall 13: Dependency Graph Cycles and Implicit Dependencies
 
-| Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
-|----------|-------------------|----------------|-----------------|
-| Parse CLI stdout instead of using Agent SDK | No SDK dependency, simpler initial impl | Fragile parsing, no streaming progress, version drift | Never for Claude Code -- the TS Agent SDK exists and is better in every way |
-| Skip touch-map pre-enforcement, rely only on post-validation | Faster adapter implementation | Wasted tokens on work that gets rejected | Only for MVP/proof-of-concept, must add pre-enforcement before v1.1 GA |
-| Single `bypassPermissions` for all tools | No permission configuration needed | Agent can run any shell command, delete files, access network | Never in production -- always pair with `disallowedTools` |
-| Hardcode adapter behavior instead of interface | Faster to build first adapter | Adding second adapter requires refactoring | Only if shipping single adapter first, but design the interface anyway |
-| Return `null` costs for non-Claude backends | Unblocks non-Claude adapter shipping | Users have no cost visibility, budget enforcement is impossible | Only for initial release -- must add cost estimation before recommending non-Claude backends |
+**What goes wrong:** The Planner produces a dependency graph with a cycle (Task A depends on Task B, Task B depends on Task A). The topological sort either crashes or silently drops tasks. More subtly: the Planner produces no explicit cycle but an implicit one through file dependencies (Task A writes X, Task B reads X and writes Y, Task C reads Y and writes Z which Task A reads).
 
-## Integration Gotchas
+**Prevention:**
+- Run cycle detection on the dependency graph before execution starts; reject the plan and trigger PLAN_AMBIGUOUS if cycles are found
+- Validate that the touch map is consistent with `depends_on`: if Task A reads a file that Task B writes, Task A must depend on Task B
+- Auto-infer dependencies from touch maps as a safety net on top of Planner-declared dependencies
+- Fail fast with a clear error message identifying the cycle, not a generic graph error
 
-| Integration | Common Mistake | Correct Approach |
-|-------------|----------------|------------------|
-| Claude Code Agent SDK | Using `settingSources: ['user', 'project', 'local']` which loads ambient config | Use `settingSources: []` and configure everything programmatically |
-| Claude Code CLI `-p` | Forgetting `--output-format json` and trying to parse human-readable text output | Always use `--output-format json` for structured data extraction |
-| Codex CLI `exec` | Not setting `--full-auto` which causes stdin prompts | Always use `--full-auto` or `--approval-policy never` for non-interactive use |
-| Any CLI agent in worktree | Not setting `cwd` on the spawn options | Always set `cwd` to the worktree path explicitly |
-| Agent SDK `query()` | Not consuming the async generator to completion | Always iterate until done; uncompleted generators leak the child process |
-| Agent SDK permissions | Using `bypassPermissions` without `disallowedTools` | Always pair bypass with explicit deny list for dangerous tools |
+**Phase relevance:** Plan validation step, before wave execution begins.
 
-## Security Mistakes
+**Confidence:** HIGH -- standard graph algorithm concern, but easy to miss if you trust the LLM to produce valid graphs.
 
-| Mistake | Risk | Prevention |
-|---------|------|------------|
-| Passing full `process.env` to agent subprocess | Agent inherits secrets, API keys for other services, internal URLs | Construct a minimal env: `PATH`, `HOME`, `ANTHROPIC_API_KEY`, `NODE_ENV` only |
-| Not disabling network access for agents | Agent can exfiltrate code to external URLs, install malicious packages | Use `disallowedTools: ["Bash(curl *)", "Bash(wget *)"]` at minimum; for stronger isolation use Codex sandbox |
-| Allowing agents to run `git push` | Agent pushes broken code to remote | Disallow `Bash(git push *)` and `Bash(git remote *)` in allowedTools |
-| Trusting agent self-reported file lists | Agent says it wrote 3 files but actually wrote 5 | Always verify against `git diff --name-only`, never trust agent output |
+---
 
-## "Looks Done But Isn't" Checklist
+### Pitfall 14: Non-Deterministic Sub-Judges
 
-- [ ] **Adapter interface:** Has `execute()` but missing `cancel()` and `isRunning()` -- verify lifecycle methods exist
-- [ ] **Cost tracking:** Shows a dollar amount but it is the SAME amount for every task -- likely parsing session aggregate as per-task value
-- [ ] **Touch-map enforcement:** Passes for SDK adapter but was never tested with CLI adapters -- verify with a deliberately violating agent prompt
-- [ ] **Permission configuration:** Works in dev but hangs in CI -- verify non-interactive execution without terminal attached
-- [ ] **Worktree isolation:** Agent stays in worktree for simple tasks but escapes for tasks requiring `npm install` -- verify with package-management tasks
-- [ ] **Error handling:** Adapter returns success/failure but does not capture agent stderr -- verify error messages propagate to the user
-- [ ] **Timeout handling:** Set a timeout but never tested what happens when it fires -- verify the agent process is actually killed, not just the promise rejected
-- [ ] **Environment isolation:** Works on your machine but fails on others -- verify no dependency on global Claude Code settings or cached sessions
+**What goes wrong:** If any Sub-Judge uses AI instead of mechanical checks, results become inconsistent. Same code passes sometimes, fails others. Flaky gates destroy trust in the pipeline.
 
-## Recovery Strategies
+**Prevention:** Sub-Judges MUST be deterministic. Use tsc, test runners, eslint -- not Claude. High Court is the only AI-powered reviewer. This is a Forge design principle to preserve absolutely. If a check seems to need AI judgment, it belongs in the High Court, not Sub-Judges.
 
-| Pitfall | Recovery Cost | Recovery Steps |
-|---------|---------------|----------------|
-| Touch-map bypass (agent wrote unauthorized files) | LOW | `git checkout -- <files>` in worktree before merge; task already failed, just clean up |
-| Cost tracking returns nulls | LOW | Retroactively check API dashboard; fix adapter parsing; re-run cost report from session data |
-| Zombie agent processes | MEDIUM | `kill -9` processes from `.anvil/pids.json`; clean up orphaned sessions; warn user about unbilled costs |
-| Behavioral divergence broke Sub-Judges | MEDIUM | Roll back the wave merge; adjust adapter prompt wrapping; re-run affected tasks |
-| Agent loaded project CLAUDE.md and followed wrong instructions | HIGH | Entire task output is suspect; must re-run with environment isolation; potentially re-run full wave |
-| Permission prompt hung the process | LOW | Kill process, add permission configuration, re-run; no data was lost, just time |
+**Phase relevance:** Sub-Judge pipeline implementation.
 
-## Pitfall-to-Phase Mapping
+**Confidence:** HIGH -- Forge design principle with clear rationale.
 
-| Pitfall | Prevention Phase | Verification |
-|---------|------------------|--------------|
-| Touch-map bypass (P1) | Phase 1: Adapter interface with `constrainFilesystem()` | Integration test: agent prompt that deliberately writes outside `writes[]` must fail |
-| Cost tracking black box (P2) | Phase 1: Interface contract; Phase 2: CostTracker refactor | Unit test: adapter returns cost data; cost report includes CLI-backed tasks |
-| Zombie processes (P3) | Phase 2: Worker execution engine | Integration test: kill orchestrator mid-run, verify agent processes die within 10s |
-| Behavioral divergence (P4) | Phase 2-3: Per-adapter implementation | Cross-adapter test suite: same task, both adapters, same structural output |
-| Context leakage (P5) | Phase 1: Interface specifies isolation; Phase 2: Implementation | Test: create CLAUDE.md with conflicting rules, verify agent ignores it |
-| Streaming parse fragility (P6) | Phase 2: Claude Code adapter | Use Agent SDK instead of CLI subprocess (avoids entirely) |
-| Version drift (P7) | Phase 2-3: Defensive parsing | CI matrix testing with pinned CLI versions |
-| Working directory confusion (P8) | Phase 2: Adapter implementation | Integration test: verify no files modified outside worktree |
-| Permission prompts (P9) | Phase 2: First integration test per adapter | Test: run adapter with no terminal attached, must not hang |
-| Session pollution (P10) | Phase 2: Agent SDK adapter | Use `persistSession: false` in SDK options |
-| API key routing (P11) | Phase 1: Interface accepts API key | Test: different keys for ambient and explicit, verify correct one is used |
+---
+
+### Pitfall 15: Claude Model Version Drift
+
+**What goes wrong:** Prompts tuned for one Claude model version behave differently on a newer version. Plan quality, Worker output format, or High Court judgment changes subtly after a model update.
+
+**Prevention:** Pin model version in config (e.g., `claude-sonnet-4-20250514`). Allow override via CLI flag or config. Test prompts when upgrading. Version the prompt templates alongside the model version they were tested against.
+
+**Phase relevance:** Every phase that writes LLM prompts.
+
+**Confidence:** MEDIUM -- well-understood LLM deployment concern.
+
+---
+
+## Phase-Specific Warnings
+
+| Phase Topic | Likely Pitfall | Mitigation |
+|-------------|---------------|------------|
+| CLI Scaffold and Packaging | Cold start DX (Pitfall 9) | Bundle aggressively, lazy-load, zero native deps |
+| Planner Station | Underspecified plans (Pitfall 1), Dependency cycles (Pitfall 13) | Rich plan schema with interface contracts, cycle detection, touch map consistency validation |
+| Worker Station | Worktree lifecycle (Pitfall 2), Context exhaustion (Pitfall 8), simple-git limits (Pitfall 11) | WorktreeManager with cleanup guarantees, context budgeting, typed git abstractions |
+| Orchestrator | Orphaned processes (Pitfall 4), State corruption (Pitfall 12) | Process group management, centralized state writes, PID tracking |
+| Wave Execution | Error cascading (Pitfall 3), Merge order (Pitfall 7) | Inter-wave coherence checks (`tsc --noEmit`), read/write dependency validation |
+| Sub-Judges | Insufficient for semantic errors (Pitfall 3), Non-deterministic (Pitfall 14), Touch map gaps (Pitfall 6) | Full-project type check between waves, mechanical-only rule, git-level enforcement |
+| High Court | Handoff blindness (Pitfall 10) | Mandatory code sampling, verifiable summary claims |
+| Cost Auditor | Token explosion (Pitfall 5) | Real-time budget tracking with circuit breakers from day one, not post-hoc reporting |
 
 ## Sources
 
-- [Claude Code Agent SDK TypeScript Reference](https://platform.claude.com/docs/en/agent-sdk/typescript) -- SDKResultMessage cost fields, Options type, permission modes, settingSources
-- [Run Claude Code Programmatically](https://code.claude.com/docs/en/headless) -- CLI `-p` mode, `--output-format json`, `--allowedTools` syntax
-- [Codex CLI Sandboxing](https://developers.openai.com/codex/concepts/sandboxing) -- sandbox modes, writable_roots, approval policies
-- [Codex CLI Non-Interactive Mode](https://developers.openai.com/codex/noninteractive) -- `exec` subcommand, `--full-auto` preset
-- [Practical Security for Sandboxing Agentic Workflows (NVIDIA)](https://developer.nvidia.com/blog/practical-security-guidance-for-sandboxing-agentic-workflows-and-managing-execution-risk/) -- filesystem write restrictions as mandatory control
-- [AI Agent Orchestration Cost Pitfalls (Talentica)](https://www.talentica.com/blogs/ai-agent-orchestration-best-practices/) -- cost amplification in multi-agent systems
-- [Using Git Worktrees with AI Agents (Nick Mitchinson)](https://www.nrmitchi.com/2025/10/using-git-worktrees-for-multi-feature-development-with-ai-agents/) -- worktree isolation patterns
-- [Claude Code SDK TypeScript Changelog](https://github.com/anthropics/claude-agent-sdk-typescript/blob/main/CHANGELOG.md) -- API stability and breaking changes
-
----
-*Pitfalls research for: Anvil v1.1 configurable CLI agent backends*
-*Researched: 2026-03-21*
+- [The Planner-Coder Gap (arxiv:2510.10460)](https://arxiv.org/abs/2510.10460) -- 75.3% of failures from information loss at plan-to-code boundary
+- [Why Multi-Agent LLM Systems Fail (Augment Code)](https://www.augmentcode.com/guides/why-multi-agent-llm-systems-fail-and-how-to-fix-them) -- specification (41.77%) and coordination (36.94%) cause 79% of breakdowns
+- [The 17x Error Trap (Towards Data Science)](https://towardsdatascience.com/why-your-multi-agent-system-is-failing-escaping-the-17x-error-trap-of-the-bag-of-agents/) -- error amplification in uncoordinated agent stages
+- [Git Worktree: Pros, Cons, and Gotchas (Josh Tune)](https://joshtune.com/posts/git-worktree-pros-cons/) -- worktree lifecycle issues and cleanup
+- [Clash: Worktree Conflict Detection (GitHub)](https://github.com/clash-sh/clash) -- early conflict detection for parallel worktrees
+- [Git Worktrees for Parallel AI Agents (Upsun)](https://devcenter.upsun.com/posts/git-worktrees-for-parallel-ai-coding-agents/) -- node_modules, disk space, setup repetition
+- [Codex App Worktrees Explained (Verdent)](https://www.verdent.ai/guides/codex-app-worktrees-explained) -- parallel agent worktree patterns
+- [Context Window Problem (Factory.ai)](https://factory.ai/news/context-window-problem) -- context rot and management strategies
+- [The Hidden AI Cost Explosion (Chrono)](https://www.chronoinnovation.com/resources/hidden-cost-explosion-in-ai) -- 100x token consumption in agentic workflows
+- [Why AI Agent Pilots Fail (Composio)](https://composio.dev/blog/why-ai-agent-pilots-fail-2026-integration-roadmap) -- 40% cancellation rate due to cost and complexity
+- [5 Tips for Cleaning Orphaned Node.js Processes](https://medium.com/@arunangshudas/5-tips-for-cleaning-orphaned-node-js-processes-196ceaa6d85e) -- child process lifecycle management
+- [Anthropic Context Windows Documentation](https://platform.claude.com/docs/en/build-with-claude/context-windows) -- context management strategies
