@@ -34,7 +34,7 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **EXEC-06**: After each wave completes, all worktrees are merged to main branch
 - [x] **EXEC-07**: Worktrees are cleaned up after merge (no stale worktrees left behind)
 - [x] **EXEC-08**: Workers that fail halt their task; the wave continues but the failed task is reported
-- [ ] **EXEC-09**: If High Court aborts or escalates, rollback last wave merge (git reset --hard + worktree cleanup) — bad architecture never leaks into main
+- [x] **EXEC-09**: If High Court aborts or escalates, rollback last wave merge (git reset --hard + worktree cleanup) — bad architecture never leaks into main
 
 ### Review
 
@@ -49,8 +49,8 @@ Requirements for initial release. Each maps to roadmap phases.
 
 - [x] **COST-01**: Token usage (input/output/cache) is tracked per agent call
 - [x] **COST-02**: Cost is calculated per wave and per session using model pricing
-- [ ] **COST-03**: Cost summary is displayed at build completion
-- [ ] **COST-04**: Cost report is saved to `.anvil/cost-report.json`
+- [x] **COST-03**: Cost summary is displayed at build completion
+- [x] **COST-04**: Cost report is saved to `.anvil/cost-report.json`
 
 ### Librarian
 
@@ -135,7 +135,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | EXEC-06 | Phase 3 | Complete |
 | EXEC-07 | Phase 3 | Complete |
 | EXEC-08 | Phase 3 | Complete |
-| EXEC-09 | Phase 4 | Pending |
+| EXEC-09 | Phase 4 | Complete |
 | REVW-01 | Phase 3 | Complete |
 | REVW-01a | Phase 3 | Complete |
 | REVW-02 | Phase 3 | Complete |
@@ -144,8 +144,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | REVW-05 | Phase 4 | Complete |
 | COST-01 | Phase 4 | Complete |
 | COST-02 | Phase 4 | Complete |
-| COST-03 | Phase 4 | Pending |
-| COST-04 | Phase 4 | Pending |
+| COST-03 | Phase 4 | Complete |
+| COST-04 | Phase 4 | Complete |
 | LIBR-01 | Phase 4 | Complete |
 | LIBR-02 | Phase 4 | Complete |
 | LIBR-03 | Phase 4 | Complete |

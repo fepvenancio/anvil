@@ -15,7 +15,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 1: Foundation** - TypeScript scaffold, Zod schemas, infrastructure wrappers, CLI entry point
 - [ ] **Phase 2: Planner and Sequential Execution** - Planner station produces validated plans; single Worker executes tasks in git worktrees
 - [ ] **Phase 3: Parallel Waves and Quality Gates** - Wave scheduler, parallel worker pool, merge engine, Sub-Judge panel
-- [ ] **Phase 4: AI Review and Audit Trail** - High Court architectural review, Librarian documentation, cost tracking
+- [x] **Phase 4: AI Review and Audit Trail** - High Court architectural review, Librarian documentation, cost tracking (completed 2026-03-21)
 - [ ] **Phase 5: CLI Polish** - Status/cost/logs commands, live progress display, color output, completion summary
 
 ## Phase Details
@@ -87,7 +87,7 @@ Plans:
 - [x] 04-01-PLAN.md — Cost tracking infrastructure: CostTracker, pricing table, CostEntry schema update
 - [x] 04-02-PLAN.md — High Court AI architectural review with structured verdicts
 - [x] 04-03-PLAN.md — Librarian documentation generation (README + ARCHITECTURE) with atomic commits
-- [ ] 04-04-PLAN.md — Pipeline wiring: CLI integration, rollback, cost display and reporting
+- [x] 04-04-PLAN.md — Pipeline wiring: CLI integration, rollback, cost display and reporting
 
 ### Phase 5: CLI Polish
 **Goal**: Users have full visibility into builds via status, cost, and log commands, with a polished terminal experience
@@ -115,5 +115,5 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 | 1. Foundation | 2/2 | Complete | 2026-03-21 |
 | 2. Planner and Sequential Execution | 3/4 | Gap closure | - |
 | 3. Parallel Waves and Quality Gates | 0/3 | Planned | - |
-| 4. AI Review and Audit Trail | 0/4 | Planned | - |
+| 4. AI Review and Audit Trail | 4/4 | Complete   | 2026-03-21 |
 | 5. CLI Polish | 0/? | Not started | - |
