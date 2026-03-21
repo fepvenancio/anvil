@@ -46,13 +46,6 @@ program
     console.log(`  Spec:        ${spec}`);
     console.log();
 
-    // Early check: fail fast if no API key
-    if (!process.env.ANTHROPIC_API_KEY) {
-      console.error(chalk.red('Error: ANTHROPIC_API_KEY environment variable is not set.'));
-      console.error(chalk.dim('Get your key at: https://console.anthropic.com/settings/keys'));
-      process.exit(1);
-    }
-
     // Phase 2: Planner -> Review -> Execute pipeline
     console.log(chalk.blue('Planning...'));
     const plan = await generatePlan(spec, config);

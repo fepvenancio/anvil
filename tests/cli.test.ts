@@ -62,8 +62,12 @@ describe('CLI smoke test', () => {
     expect(data).toHaveProperty('plan');
   });
 
-  it('exits with error when ANTHROPIC_API_KEY is not set', () => {
-    const { stderr } = runCli('run "test"', tmpDir);
-    expect(stderr).toContain('ANTHROPIC_API_KEY');
+  it('shows version with --version flag', () => {
+    const cliPath = join(process.cwd(), 'src', 'cli.ts');
+    const stdout = require('node:child_process').execSync(
+      `npx tsx "${cliPath}" --version`,
+      { encoding: 'utf-8', timeout: 5000 },
+    );
+    expect(stdout.trim()).toMatch(/^\d+\.\d+\.\d+$/);
   });
 });
