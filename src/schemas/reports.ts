@@ -34,6 +34,7 @@ export const CostEntrySchema = z.object({
   outputTokens: z.number().int(),
   cacheReadTokens: z.number().int().default(0),
   cacheWriteTokens: z.number().int().default(0),
+  waveNumber: z.number().int().optional(),
   costUsd: z.number(),
 });
 
