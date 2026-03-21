@@ -18,11 +18,16 @@ Target user: solo devs who loved Forge's power but hated the 40GB RAM / Docker /
 - ✓ Core Zod schemas (Plan, Task, Wave, Session, Reports, Config) — Phase 1
 - ✓ Plan validation against schema (accepts/rejects correctly) — Phase 1
 - ✓ `.anvil/` directory initialization with audit structure — Phase 1
+- ✓ Planner Station: spec → JSON plan with tasks, touch maps, dependency graph — Phase 2
+- ✓ Overlap detection: rejects plans with conflicting writes — Phase 2
+- ✓ Plan review prompt (Y/n/edit with $EDITOR) — Phase 2
+- ✓ Worker execution in isolated git worktrees with atomic commits — Phase 2
+- ✓ Touch-map enforcement: workers only modify declared files — Phase 2
+- ✓ Sequential task execution pipeline (Planner → review → execute) — Phase 2
 
 ### Active
 
-- [ ] CLI with commands: `run`, `status`, `cost`, `logs`, `resume`, `cancel`, `ship --pr`
-- [ ] Planner Station: analyzes spec, produces JSON plan with tasks, touch maps, and dependency graph
+- [ ] CLI with commands: `status`, `cost`, `logs`, `resume`, `cancel`, `ship --pr`
 - [ ] Worker Stations: execute tasks in isolated git worktrees with atomic commits
 - [ ] Ordered Wave execution: topological sort on dependency graph, parallel within waves, sequential across waves
 - [ ] Touch map enforcement: Workers can only read/write declared files
@@ -111,4 +116,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-03-21 after Phase 1 completion*
+*Last updated: 2026-03-21 after Phase 2 completion*
