@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-stopped_at: Completed 02-04-PLAN.md
-last_updated: "2026-03-21T01:19:34.143Z"
+stopped_at: Completed 03-01-PLAN.md
+last_updated: "2026-03-21T02:08:20.116Z"
 progress:
   total_phases: 5
   completed_phases: 2
-  total_plans: 6
-  completed_plans: 6
+  total_plans: 9
+  completed_plans: 8
 ---
 
 # Project State
@@ -19,12 +19,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-20)
 
 **Core value:** `npx anvil run "Build X"` produces a complete, reviewed, production-ready project with clean git history and full audit trail -- in under 5 minutes, with zero manual setup.
-**Current focus:** Phase 02 — Planner and Sequential Execution
+**Current focus:** Phase 03 — Parallel Waves and Quality Gates
 
 ## Current Position
 
-Phase: 3
-Plan: Not started
+Phase: 03 (Parallel Waves and Quality Gates) — EXECUTING
+Plan: 3 of 3
 
 ## Performance Metrics
 
@@ -52,6 +52,8 @@ Plan: Not started
 | Phase 02 P02 | 3min | 2 tasks | 7 files |
 | Phase 02 P03 | 3min | 2 tasks | 7 files |
 | Phase 02 P04 | 2min | 1 tasks | 1 files |
+| Phase 03 P01 | 5min | 2 tasks | 7 files |
+| Phase 03 P02 | 4min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -72,6 +74,11 @@ Recent decisions affecting current work:
 - [Phase 02]: Used node:readline for interactive prompt instead of inquirer (lighter, per stack guidance)
 - [Phase 02]: Sequential runner stops on first task failure (fail-fast for sequential mode)
 - [Phase 02]: Used options.client dependency injection for Anthropic client mocking in integration tests
+- [Phase 03]: p-limit v6 (ESM-only) for concurrency control in wave execution
+- [Phase 03]: Halt on any wave failure (fail-fast prevents dependent tasks on broken foundation)
+- [Phase 03]: Deterministic merge order via sorted taskIds for reproducible git history
+- [Phase 03]: Used execFile with promisify for Sub-Judge child process spawning (no execa dependency)
+- [Phase 03]: Touch-map judge accepts baselineSha parameter from caller (not HEAD~N)
 
 ### Pending Todos
 
@@ -83,6 +90,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-21T01:16:33.080Z
-Stopped at: Completed 02-04-PLAN.md
+Last session: 2026-03-21T02:08:20.114Z
+Stopped at: Completed 03-01-PLAN.md
 Resume file: None

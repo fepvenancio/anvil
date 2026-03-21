@@ -66,8 +66,8 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 03-01-PLAN.md — Wave runner: topologicalWaves, batch merge, parallel execution with p-limit, error isolation
-- [ ] 03-02-PLAN.md — Sub-Judge panel: tsc, vitest, and touch-map mechanical checkers
+- [x] 03-01-PLAN.md — Wave runner: topologicalWaves, batch merge, parallel execution with p-limit, error isolation
+- [x] 03-02-PLAN.md — Sub-Judge panel: tsc, vitest, and touch-map mechanical checkers
 - [ ] 03-03-PLAN.md — Integration: wire Sub-Judges into wave runner, update CLI to use wave execution
 
 ### Phase 4: AI Review and Audit Trail

@@ -38,9 +38,9 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Review
 
-- [ ] **REVW-01**: Sub-Judges run in parallel after every wave with mechanical checks
-- [ ] **REVW-01a**: Minimal v1 Sub-Judge set: tsc check, touch-map violation detector, vitest run (if tests exist)
-- [ ] **REVW-02**: Sub-Judge failure does not halt current wave (other tasks finish), but halts progression to next wave — all failures reported together
+- [x] **REVW-01**: Sub-Judges run in parallel after every wave with mechanical checks
+- [x] **REVW-01a**: Minimal v1 Sub-Judge set: tsc check, touch-map violation detector, vitest run (if tests exist)
+- [x] **REVW-02**: Sub-Judge failure does not halt current wave (other tasks finish), but halts progression to next wave — all failures reported together
 - [ ] **REVW-03**: High Court performs a single end-of-build AI architectural review
 - [ ] **REVW-04**: High Court produces one of three decisions: merge (approve), human_required (print flags + save `.anvil/high-court-report.json`), or abort (rollback)
 - [ ] **REVW-05**: High Court checks: architectural invariants, no circular dependencies, cross-task coherence
@@ -136,9 +136,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | EXEC-07 | Phase 3 | Pending |
 | EXEC-08 | Phase 3 | Pending |
 | EXEC-09 | Phase 4 | Pending |
-| REVW-01 | Phase 3 | Pending |
-| REVW-01a | Phase 3 | Pending |
-| REVW-02 | Phase 3 | Pending |
+| REVW-01 | Phase 3 | Complete |
+| REVW-01a | Phase 3 | Complete |
+| REVW-02 | Phase 3 | Complete |
 | REVW-03 | Phase 4 | Pending |
 | REVW-04 | Phase 4 | Pending |
 | REVW-05 | Phase 4 | Pending |
