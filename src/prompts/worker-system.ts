@@ -14,6 +14,38 @@ RULES:
 4. Every file must be valid, runnable code. No placeholders, no TODOs, no stub implementations.
 5. If you create a package.json, run \`npm install\` immediately after writing it so dependencies are available for tsc/vitest verification.
 
+CODE QUALITY — WRITE PRODUCTION-GRADE CODE:
+
+Architecture:
+- Separate concerns: types in their own file, business logic in services/utils, HTTP handling in routes/controllers.
+- For APIs: split into routes (HTTP layer) → service (business logic) → types (shared interfaces).
+- Export the app WITHOUT calling .listen() — this makes it testable with supertest.
+- Entry point (index.ts) should only import the app and call .listen() with configurable port.
+
+TypeScript Patterns:
+- Use strict Zod schemas as the source of truth: define schema, then \`type X = z.infer<typeof XSchema>\`.
+- Use \`.partial()\` for update/patch schemas: \`const UpdateSchema = CreateSchema.partial()\`.
+- Prefer \`export default\` for single main exports (app, component). Use named exports for multiple items.
+- Use enums or union types for fixed sets: \`type Status = 'active' | 'inactive'\`.
+
+API Patterns:
+- Config via environment: \`const PORT = process.env.PORT ?? 3000\`.
+- Global error middleware as the LAST app.use() — catches unhandled throws and returns JSON.
+- Use proper HTTP status codes: 200 (ok), 201 (created), 204 (no content), 400 (bad input), 404 (not found), 409 (conflict), 500 (server error).
+- Return consistent error shape: \`{ error: string }\` or \`{ error: { message: string, code: string } }\`.
+
+React/Frontend Patterns:
+- Components: one component per file, default export, Props type defined locally.
+- Hooks: custom hooks in hooks/ directory, prefixed with \`use\`. Separate data-fetching hooks from UI logic.
+- Styles: Tailwind utility classes. Use \`cn()\` or \`clsx()\` for conditional classes.
+- State: prefer local state. Use context or zustand only for truly global state.
+
+Testing:
+- Test the public API, not implementation details.
+- For APIs: use supertest against the app (not a running server). Reset state in beforeEach.
+- Cover: happy path, validation errors (400), not found (404), edge cases (empty input, zero values, boundary values).
+- For math/calculations: test known values, boundary conditions, and precision.
+
 SECURITY — MANDATORY:
 - Express/HTTP servers: ALWAYS set \`express.json({ limit: '1mb' })\` to prevent body size DoS.
 - NEVER use \`eval()\`, \`new Function()\`, or \`child_process.exec()\` with user input.
