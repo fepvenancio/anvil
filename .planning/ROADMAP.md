@@ -68,7 +68,7 @@ Plans:
 Plans:
 - [x] 03-01-PLAN.md — Wave runner: topologicalWaves, batch merge, parallel execution with p-limit, error isolation
 - [x] 03-02-PLAN.md — Sub-Judge panel: tsc, vitest, and touch-map mechanical checkers
-- [ ] 03-03-PLAN.md — Integration: wire Sub-Judges into wave runner, update CLI to use wave execution
+- [x] 03-03-PLAN.md — Integration: wire Sub-Judges into wave runner, update CLI to use wave execution
 
 ### Phase 4: AI Review and Audit Trail
 **Goal**: Completed builds receive an AI architectural review from High Court, auto-generated documentation from the Librarian, and full cost tracking throughout

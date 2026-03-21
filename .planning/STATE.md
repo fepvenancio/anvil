@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-stopped_at: Completed 03-01-PLAN.md
-last_updated: "2026-03-21T02:08:20.116Z"
+stopped_at: Completed 03-03-PLAN.md
+last_updated: "2026-03-21T02:14:58.757Z"
 progress:
   total_phases: 5
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 9
-  completed_plans: 8
+  completed_plans: 9
 ---
 
 # Project State
@@ -54,6 +54,7 @@ Plan: 3 of 3
 | Phase 02 P04 | 2min | 1 tasks | 1 files |
 | Phase 03 P01 | 5min | 2 tasks | 7 files |
 | Phase 03 P02 | 4min | 2 tasks | 5 files |
+| Phase 03 P03 | 4min | 1 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -79,6 +80,8 @@ Recent decisions affecting current work:
 - [Phase 03]: Deterministic merge order via sorted taskIds for reproducible git history
 - [Phase 03]: Used execFile with promisify for Sub-Judge child process spawning (no execa dependency)
 - [Phase 03]: Touch-map judge accepts baselineSha parameter from caller (not HEAD~N)
+- [Phase 03]: Baseline SHA captured before wave merges for accurate Sub-Judge touch-map diffing
+- [Phase 03]: Task failures and Sub-Judge failures both independently halt wave progression; reported together
 
 ### Pending Todos
 
@@ -90,6 +93,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-21T02:08:20.114Z
-Stopped at: Completed 03-01-PLAN.md
+Last session: 2026-03-21T02:14:58.755Z
+Stopped at: Completed 03-03-PLAN.md
 Resume file: None
