@@ -81,12 +81,13 @@ Plans:
   4. After High Court approval, the Librarian generates README.md and ARCHITECTURE.md from build artifacts, committed as atomic commits
   5. Token usage (input/output/cache) is tracked per agent call, with cost calculated per wave and per session
   6. A cost summary is displayed at build completion and saved to `.anvil/cost-report.json`
-**Plans**: TBD
+**Plans**: 4 plans
 
 Plans:
-- [ ] 04-01: TBD
-- [ ] 04-02: TBD
-- [ ] 04-03: TBD
+- [ ] 04-01-PLAN.md — Cost tracking infrastructure: CostTracker, pricing table, CostEntry schema update
+- [ ] 04-02-PLAN.md — High Court AI architectural review with structured verdicts
+- [ ] 04-03-PLAN.md — Librarian documentation generation (README + ARCHITECTURE) with atomic commits
+- [ ] 04-04-PLAN.md — Pipeline wiring: CLI integration, rollback, cost display and reporting
 
 ### Phase 5: CLI Polish
 **Goal**: Users have full visibility into builds via status, cost, and log commands, with a polished terminal experience
@@ -114,5 +115,5 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 | 1. Foundation | 2/2 | Complete | 2026-03-21 |
 | 2. Planner and Sequential Execution | 3/4 | Gap closure | - |
 | 3. Parallel Waves and Quality Gates | 0/3 | Planned | - |
-| 4. AI Review and Audit Trail | 0/? | Not started | - |
+| 4. AI Review and Audit Trail | 0/4 | Planned | - |
 | 5. CLI Polish | 0/? | Not started | - |
