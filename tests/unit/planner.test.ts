@@ -190,7 +190,7 @@ describe('generatePlan', () => {
 
     const { generatePlan } = await import('../../src/stations/planner.js');
     await expect(
-      generatePlan('Build something', config),
+      generatePlan('Build something', config, { maxRetries: 0 }),
     ).rejects.toThrow('Invalid dependency references');
   });
 });

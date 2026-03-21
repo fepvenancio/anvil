@@ -1,10 +1,17 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
+import { execFile } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { PlanSchema, type Plan } from '../schemas/plan.js';
 import type { AnvilConfig } from '../schemas/config.js';
 import { detectWriteOverlaps } from '../core/validator.js';
 import { validateDependencyRefs } from '../core/topological-sort.js';
 import { PLANNER_SYSTEM_PROMPT, buildPlannerPrompt } from '../prompts/planner-system.js';
 import type { StackPreset } from '../stacks/index.js';
+import { validatePlanStructure } from './plan-critic.js';
+
+const execFileAsync = promisify(execFile);
 
 export interface GeneratePlanOptions {
   /** Maximum number of re-plan attempts on write overlap. Default: 3. */
@@ -13,6 +20,8 @@ export interface GeneratePlanOptions {
   mockPlan?: Plan;
   /** Stack preset to inject into planner prompt. Uses default TypeScript if omitted. */
   stack?: StackPreset;
+  /** Project directory for brownfield detection. Default: process.cwd(). */
+  projectDir?: string;
 }
 
 /**
@@ -32,7 +41,15 @@ export async function generatePlan(
 
   const maxRetries = options?.maxRetries ?? 3;
   const systemPrompt = options?.stack ? buildPlannerPrompt(options.stack) : PLANNER_SYSTEM_PROMPT;
-  return _generateWithRetry(config, spec, '', maxRetries, systemPrompt);
+  const projectDir = options?.projectDir ?? process.cwd();
+
+  // Brownfield detection: if project already has source files, inject context
+  const projectContext = await _detectProjectContext(projectDir);
+  const specWithContext = projectContext
+    ? `${spec}\n\n## Existing Project Context\nThis is a BROWNFIELD project — files already exist. Do NOT generate a scaffold task-001. Instead, work with the existing structure.\n\n### File Tree\n${projectContext.fileTree}\n\n### Key File Signatures\n${projectContext.signatures}`
+    : spec;
+
+  return _generateWithRetry(config, specWithContext, '', maxRetries, systemPrompt);
 }
 
 async function _generateWithRetry(
@@ -131,8 +148,78 @@ Rules:
   // Check for invalid dependency references
   const depErrors = validateDependencyRefs(plan.tasks);
   if (depErrors.length > 0) {
-    throw new Error(`Invalid dependency references: ${depErrors.join('; ')}`);
+    if (retriesRemaining <= 0) {
+      throw new Error(`Invalid dependency references: ${depErrors.join('; ')}`);
+    }
+    const feedback = `${feedbackHistory}\n\nInvalid dependency references:\n${depErrors.map(e => `- ${e}`).join('\n')}\nFix these dependency references.`;
+    return _generateWithRetry(config, spec, feedback, retriesRemaining - 1, systemPrompt);
+  }
+
+  // Structural validation: reads/writes consistency, missing deps, circular deps
+  const structuralIssues = validatePlanStructure(plan);
+  if (structuralIssues.length > 0) {
+    if (retriesRemaining <= 0) {
+      throw new Error(`Plan has structural issues after max retries: ${structuralIssues.join('; ')}`);
+    }
+    const feedback = `${feedbackHistory}\n\nYour plan has structural issues:\n${structuralIssues.map(i => `- ${i}`).join('\n')}\nFix these issues and regenerate.`;
+    return _generateWithRetry(config, spec, feedback, retriesRemaining - 1, systemPrompt);
   }
 
   return plan;
+}
+
+/**
+ * Detect if the project directory already has source files (brownfield).
+ * Returns file tree + export signatures for key files, or null for greenfield.
+ */
+async function _detectProjectContext(
+  projectDir: string,
+): Promise<{ fileTree: string; signatures: string } | null> {
+  let files: string[];
+  try {
+    const { stdout } = await execFileAsync(
+      'git', ['ls-files', '--cached', '--others', '--exclude-standard'],
+      { cwd: projectDir, timeout: 5_000 },
+    );
+    files = stdout.trim().split('\n').filter(Boolean);
+  } catch {
+    return null;
+  }
+
+  // Filter to source files only (ignore node_modules, .anvil, etc.)
+  const sourceExts = new Set(['.ts', '.tsx', '.js', '.jsx', '.py', '.go', '.rs']);
+  const sourceFiles = files.filter(f => {
+    const ext = f.slice(f.lastIndexOf('.'));
+    return sourceExts.has(ext) && !f.includes('node_modules') && !f.startsWith('.anvil/');
+  });
+
+  // If fewer than 2 source files, treat as greenfield
+  if (sourceFiles.length < 2) return null;
+
+  const fileTree = files.slice(0, 100).map(f => `  ${f}`).join('\n');
+
+  // Extract export signatures from key TS/JS files (up to 10 files, first 5 exports each)
+  const signatureLines: string[] = [];
+  const keyFiles = sourceFiles.slice(0, 10);
+  for (const file of keyFiles) {
+    try {
+      const content = await readFile(join(projectDir, file), 'utf-8');
+      const exports = content
+        .split('\n')
+        .filter(line => /^export\s/.test(line))
+        .slice(0, 5)
+        .map(line => line.trim().slice(0, 120));
+      if (exports.length > 0) {
+        signatureLines.push(`#### ${file}`);
+        signatureLines.push(...exports.map(e => `  ${e}`));
+      }
+    } catch {
+      // Skip unreadable files
+    }
+  }
+
+  return {
+    fileTree,
+    signatures: signatureLines.join('\n') || '(no exports found)',
+  };
 }

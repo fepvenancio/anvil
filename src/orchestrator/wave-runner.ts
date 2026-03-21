@@ -90,7 +90,14 @@ export async function executeInWaves(
               const wt = await worktreeManager.create(taskId);
               worktreePath = wt.worktreePath;
 
-              const result = await executeTask(task, worktreePath, config);
+              const abortController = new AbortController();
+              const workerTimeout = setTimeout(() => abortController.abort(), config.workerTimeoutMs);
+              let result: WorkerResult;
+              try {
+                result = await executeTask(task, worktreePath, config, { abortController });
+              } finally {
+                clearTimeout(workerTimeout);
+              }
               waveResults.push(result);
 
               if (result.success) {
@@ -268,18 +275,25 @@ export async function executeInWaves(
                 const wt = await worktreeManager.create(taskId);
                 retryWorktreePath = wt.worktreePath;
 
-                const result = await executeTask(task, retryWorktreePath, config, { retryContext });
-                retryResults.push(result);
+                const retryAbort = new AbortController();
+                const retryTimeoutHandle = setTimeout(() => retryAbort.abort(), config.workerTimeoutMs);
+                let retryResult: WorkerResult;
+                try {
+                  retryResult = await executeTask(task, retryWorktreePath, config, { retryContext, abortController: retryAbort });
+                } finally {
+                  clearTimeout(retryTimeoutHandle);
+                }
+                retryResults.push(retryResult);
 
-                if (result.success) {
-                  if (result.usage && options?.costTracker) {
+                if (retryResult.success) {
+                  if (retryResult.usage && options?.costTracker) {
                     options.costTracker.recordFromResponse(
                       {
                         usage: {
-                          input_tokens: result.usage.input_tokens,
-                          output_tokens: result.usage.output_tokens,
-                          cache_creation_input_tokens: result.usage.cache_creation_input_tokens ?? undefined,
-                          cache_read_input_tokens: result.usage.cache_read_input_tokens ?? undefined,
+                          input_tokens: retryResult.usage.input_tokens,
+                          output_tokens: retryResult.usage.output_tokens,
+                          cache_creation_input_tokens: retryResult.usage.cache_creation_input_tokens ?? undefined,
+                          cache_read_input_tokens: retryResult.usage.cache_read_input_tokens ?? undefined,
                         },
                       },
                       `worker:${taskId}:retry${retryAttempt}`,
@@ -292,9 +306,9 @@ export async function executeInWaves(
                     `feat(anvil): ${task.description.slice(0, 72)} (retry ${retryAttempt})`,
                     task.writes,
                   );
-                  progress.taskComplete(wave.waveNumber, taskId, result.filesWritten.length);
+                  progress.taskComplete(wave.waveNumber, taskId, retryResult.filesWritten.length);
                 } else {
-                  progress.taskFailed(wave.waveNumber, taskId, result.error ?? 'unknown');
+                  progress.taskFailed(wave.waveNumber, taskId, retryResult.error ?? 'unknown');
                 }
               } catch (err) {
                 const error = err instanceof Error ? err.message : String(err);
