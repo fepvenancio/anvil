@@ -15,3 +15,8 @@ export {
 export { createLogger } from './core/logger.js';
 export { WorktreeManager, validateTouchMap } from './git/worktree-manager.js';
 export { executeTask, type WorkerResult } from './workers/worker.js';
+export { promptPlanReview, editPlanInEditor, displayPlanSummary } from './ui/plan-review.js';
+export { executeSequentially, type ExecutionResult } from './orchestrator/sequential-runner.js';
+export { generatePlan } from './stations/planner.js';
+export { PLANNER_SYSTEM_PROMPT } from './prompts/planner-system.js';
+export { WORKER_SYSTEM_PROMPT, WORKER_TOOLS } from './prompts/worker-system.js';
