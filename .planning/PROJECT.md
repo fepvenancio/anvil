@@ -34,6 +34,11 @@ Target user: solo devs who loved Forge's power but hated the 40GB RAM / Docker /
 - ✓ Librarian auto-generates README.md + ARCHITECTURE.md — Phase 4
 - ✓ Cost tracking per agent call with per-wave/session aggregation — Phase 4
 - ✓ Cost summary display + .anvil/cost-report.json — Phase 4
+- ✓ `anvil status` command with build state + audit trail — Phase 5
+- ✓ `anvil cost` command with per-agent/per-wave breakdown — Phase 5
+- ✓ `anvil logs` command with wave/task/level filters — Phase 5
+- ✓ Live progress display with ora spinners + color-coded output — Phase 5
+- ✓ Completion summary banner with next steps — Phase 5
 
 ### Active
 
@@ -126,4 +131,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-03-21 after Phase 4 completion*
+*Last updated: 2026-03-21 after Phase 5 completion — v1 milestone complete*
