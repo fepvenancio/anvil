@@ -146,13 +146,13 @@ export class WorktreeManager {
   }
 }
 
-// Common side-effect files that should be staged alongside declared writes
+// Side-effect files staged alongside declared writes.
+// IMPORTANT: Lockfiles (package-lock.json, yarn.lock, etc.) are intentionally EXCLUDED.
+// If parallel workers each run npm install, they generate different lockfiles,
+// causing guaranteed merge conflicts in mergeWaveBranches. Instead, npm install
+// runs once on main after wave merges (see wave-runner.ts post-merge step).
 const SIDE_EFFECT_FILES = [
-  'package-lock.json',
   '.gitignore',
-  'yarn.lock',
-  'pnpm-lock.yaml',
-  'bun.lockb',
 ];
 
 /**

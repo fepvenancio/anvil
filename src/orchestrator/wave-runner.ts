@@ -5,10 +5,16 @@ import { WorktreeManager } from '../git/worktree-manager.js';
 import { executeTask, type WorkerResult } from '../workers/worker.js';
 import { topologicalWaves } from '../core/topological-sort.js';
 import { runSubJudges } from '../judges/sub-judge-panel.js';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { stat } from 'node:fs/promises';
+import { join } from 'node:path';
 import pLimit from 'p-limit';
 import { simpleGit } from 'simple-git';
 import type { CostTracker } from '../cost/tracker.js';
 import { ProgressDisplay } from '../ui/progress.js';
+
+const execFileAsync = promisify(execFile);
 
 export interface WaveReport {
   waveNumber: number;
@@ -166,6 +172,19 @@ export async function executeInWaves(
             progress.taskFailed(wave.waveNumber, failedId, 'merge failed');
           }
         }
+      }
+
+      // Post-merge: reconcile dependencies on main branch
+      // Workers don't commit lockfiles (causes merge conflicts in parallel waves).
+      // Instead, run npm install once on merged main to generate a consistent lockfile.
+      try {
+        await stat(join(baseDir, 'package.json'));
+        await execFileAsync('npm', ['install', '--ignore-scripts'], {
+          cwd: baseDir,
+          timeout: 120_000,
+        });
+      } catch {
+        // No package.json or install failed — skip silently
       }
 
       // Cleanup ALL worktrees (success + failure)
