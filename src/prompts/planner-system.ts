@@ -32,11 +32,16 @@ task-001 MUST always be the project scaffold. It:
 - Do NOT list directories in writes[] — only list actual files (e.g., "src/index.ts" not "src/")
 
 INTERFACE CONTRACTS — MANDATORY:
-Every task MUST declare an "exports" array for each file in writes[]. Each export entry has:
+Every task MUST declare an "exports" array. Each export entry has:
 - "name": the exact exported identifier (function name, class name, type name, constant name)
 - "type": the type signature (e.g., "(op: string, a: number, b: number) => number")
 Downstream tasks that read these files MUST reference the EXACT names from the exports contract.
 This is how we prevent the Planner-Coder Gap: workers know the exact interface before they write code.
+
+IMPORTANT: exports[] is for TypeScript/JavaScript code exports ONLY.
+- Config files (package.json, tsconfig.json, .gitignore, *.config.ts) → use exports: []
+- Scaffold tasks that only create config files → use exports: []
+- Only list exports for files that contain "export function", "export const", "export type", etc.
 
 Example exports for a calculator module:
   exports: [

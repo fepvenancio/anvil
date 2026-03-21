@@ -17,12 +17,15 @@ export async function runInterfaceCheck(
   for (const task of tasks) {
     if (task.exports.length === 0) continue;
 
-    // Collect all actual exports from all files this task writes
+    // Collect all actual exports from source files this task writes
+    // Skip config files (vitest.config.ts, tsconfig.json, etc.) — they don't have meaningful exports
     const allActualExports = new Set<string>();
+    const SOURCE_FILE_RE = /\.(ts|tsx|js|jsx|mts|mjs)$/;
+    const CONFIG_FILE_RE = /\.config\.(ts|js|mts|mjs)$|tsconfig|\.json$|\.gitignore$/;
 
     for (const file of task.writes) {
-      // Only check TypeScript/JavaScript files
-      if (!/\.(ts|tsx|js|jsx|mts|mjs)$/.test(file)) continue;
+      if (!SOURCE_FILE_RE.test(file)) continue;
+      if (CONFIG_FILE_RE.test(file)) continue; // Skip config files
 
       let content: string;
       try {
@@ -36,8 +39,9 @@ export async function runInterfaceCheck(
       }
     }
 
-    // If the task has no source files yet (e.g., scaffold), skip
-    if (allActualExports.size === 0 && task.writes.every(f => !/\.(ts|tsx|js|jsx)$/.test(f))) {
+    // If the task has no non-config source files (e.g., scaffold), skip
+    const hasSourceFiles = task.writes.some(f => SOURCE_FILE_RE.test(f) && !CONFIG_FILE_RE.test(f));
+    if (!hasSourceFiles) {
       continue;
     }
 
