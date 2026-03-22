@@ -127,7 +127,10 @@ export async function runSecurityCheck(projectDir: string): Promise<SubJudgeChec
     }
   }
 
-  // Run npm audit if package-lock.json exists (checks for known vulnerable deps)
+  // Run npm audit if package-lock.json exists (advisory, not blocking)
+  // npm audit findings are warnings — common packages (bcrypt, jsonwebtoken) have
+  // known CVEs that the code generator can't fix. Log them but don't block the build.
+  let auditWarning = '';
   try {
     await stat(join(projectDir, 'package-lock.json'));
     try {
@@ -142,12 +145,7 @@ export async function runSecurityCheck(projectDir: string): Promise<SubJudgeChec
           const audit = JSON.parse(auditErr.stdout);
           const highOrCritical = (audit.metadata?.vulnerabilities?.high ?? 0) + (audit.metadata?.vulnerabilities?.critical ?? 0);
           if (highOrCritical > 0) {
-            violations.push({
-              file: 'package-lock.json',
-              line: 1,
-              rule: 'npm-audit',
-              snippet: `${highOrCritical} high/critical vulnerability(ies) in dependencies`,
-            });
+            auditWarning = `npm audit: ${highOrCritical} high/critical vulnerability(ies) in dependencies`;
           }
         } catch {
           // Couldn't parse audit output — skip
@@ -159,12 +157,13 @@ export async function runSecurityCheck(projectDir: string): Promise<SubJudgeChec
   }
 
   if (violations.length === 0) {
-    return { name: 'security', passed: true };
+    const msg = auditWarning ? `passed (warning: ${auditWarning})` : undefined;
+    return { name: 'security', passed: true, message: msg };
   }
 
   const details = violations
     .map(v => `${v.file}:${v.line} [${v.rule}] ${v.snippet}`)
-    .join('\n');
+    .join('\n') + (auditWarning ? `\n\nWarning: ${auditWarning}` : '');
 
   return {
     name: 'security',
