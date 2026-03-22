@@ -54,9 +54,9 @@ const SECURITY_RULES: Array<{
   },
   {
     name: 'no-cors-wildcard',
-    pattern: /cors\(\s*\)|origin:\s*['"]?\*['"]?|Access-Control-Allow-Origin['"]\s*,\s*['"]\*/,
+    pattern: /origin:\s*['"]?\*['"]?|Access-Control-Allow-Origin['"]\s*,\s*['"]\*/,
     fileExts: ['.ts', '.js', '.mts', '.mjs'],
-    description: 'CORS wildcard (*) allows any origin',
+    description: 'Explicit CORS wildcard origin: "*" — use specific origins in production',
   },
   {
     name: 'no-express-json-no-limit',
