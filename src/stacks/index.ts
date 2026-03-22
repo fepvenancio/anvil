@@ -13,6 +13,8 @@ const typescript: StackPreset = {
 - Vitest for testing, supertest for API testing
 - Zod for runtime validation (schemas as source of truth)
 - tsconfig.json: strict: true, target: "ES2022", module: "node16", moduleResolution: "node16". Use "include": ["src/**/*"] ONLY — do NOT add a "files" property (it overrides include and breaks tsc)
+- vitest config: if creating vitest.config.ts, set include to ["src/**/*.test.ts", "tests/**/*.test.ts"] so tests work in both src/ and tests/ directories
+- Test files: put tests in tests/ directory (e.g., tests/api.test.ts) OR co-located in src/ (e.g., src/app.test.ts). The vitest config MUST match whichever location you choose.
 - package.json: "type": "module"
 - devDependencies MUST include: typescript, vitest, @types/node, supertest, @types/supertest, @types/express (if using Express)
 - dependencies for APIs MUST include: express, zod, cors
