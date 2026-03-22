@@ -100,6 +100,13 @@ React/Frontend Patterns:
 - Loading states: always handle loading and error states in components that fetch data.
 - Accessibility: all form inputs have labels, all images have alt text, all buttons have accessible names.
 
+Package Selection:
+- ALWAYS prefer pure JS packages over native addons (they work without build tools):
+  - Use \`bcryptjs\` instead of \`bcrypt\` (no native compilation needed)
+  - Use \`better-sqlite3\` only if SQLite is required (needs build tools)
+  - Use \`jose\` instead of \`jsonwebtoken\` when possible (modern, typed, no native deps)
+- If the spec says "bcrypt", use \`bcryptjs\` — same API, no native binding issues.
+
 SECURITY — MANDATORY:
 - Express: ALWAYS \`express.json({ limit: '1mb' })\`. No unlimited body parsing.
 - NEVER use eval(), new Function(), or child_process.exec() with user input.
