@@ -163,7 +163,12 @@ Rules:
     return _generateWithRetry(config, spec, feedback, retriesRemaining - 1, systemPrompt);
   }
 
+  // Auto-fix FIRST: ensure dependency chains are complete before validating
+  // This fixes the most common planner mistake: missing dependsOn entries
+  _autoFixDependencies(plan);
+
   // Structural validation: reads/writes consistency, missing deps, circular deps
+  // Run after auto-fix — catches issues the auto-fixer can't resolve (circular deps, etc.)
   const structuralIssues = validatePlanStructure(plan);
   if (structuralIssues.length > 0) {
     if (retriesRemaining <= 0) {
@@ -172,10 +177,6 @@ Rules:
     const feedback = `${feedbackHistory}\n\nYour plan has structural issues:\n${structuralIssues.map(i => `- ${i}`).join('\n')}\nFix these issues and regenerate.`;
     return _generateWithRetry(config, spec, feedback, retriesRemaining - 1, systemPrompt);
   }
-
-  // Auto-fix: ensure dependency chains are complete
-  // If task A reads a file written by task B, A must depend on B
-  _autoFixDependencies(plan);
 
   return plan;
 }
