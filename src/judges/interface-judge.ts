@@ -47,13 +47,18 @@ export async function runInterfaceCheck(
 
     // Check each planned export exists in the actual output
     for (const planned of task.exports) {
-      const found = allActualExports.has(planned.name)
-        // Treat "export default" as matching the single planned export name
+      // Normalize the planned name: strip descriptions in parentheses/after spaces
+      // e.g., "default (auth router)" → "default", "calculateFee (service)" → "calculateFee"
+      const cleanName = planned.name.replace(/\s*\(.*\)$/, '').replace(/\s+.*$/, '').trim();
+
+      const found = allActualExports.has(cleanName)
+        || allActualExports.has(planned.name)
+        // Treat "export default" as matching the planned export name
         // (common pattern: plan says "app", worker does "export default app")
-        || (allActualExports.has('default') && task.exports.length === 1);
+        || (allActualExports.has('default') && (cleanName === 'default' || task.exports.length === 1));
       if (!found) {
         mismatches.push(
-          `${task.id}: should export "${planned.name}" but doesn't. Actual: [${[...allActualExports].join(', ')}]`,
+          `${task.id}: should export "${cleanName}" but doesn't. Actual: [${[...allActualExports].join(', ')}]`,
         );
       }
     }
