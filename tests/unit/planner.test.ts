@@ -23,19 +23,21 @@ function makePlan(overrides?: Partial<Plan>): Plan {
     tasks: [
       {
         id: 'task-001',
-        description: 'Create the server entry point',
-        writes: ['src/server.ts'],
+        description: 'Scaffold the project with package.json and tsconfig.json',
+        writes: ['package.json', 'tsconfig.json'],
         reads: [],
         dependsOn: [],
-        acceptanceCriteria: ['Server starts on port 3000'],
+        acceptanceCriteria: ['npm install succeeds'],
+        exports: [],
       },
       {
         id: 'task-002',
         description: 'Create user routes',
         writes: ['src/routes/users.ts'],
-        reads: ['src/server.ts'],
+        reads: [],
         dependsOn: ['task-001'],
         acceptanceCriteria: ['GET /users returns 200'],
+        exports: [{ name: 'usersRouter', type: 'Router' }],
       },
     ],
     ...overrides,
@@ -125,7 +127,7 @@ describe('generatePlan', () => {
 
     expect(result.id).toBe(plan.id);
     expect(result.tasks).toHaveLength(2);
-    expect(result.tasks[0].writes).toContain('src/server.ts');
+    expect(result.tasks[0].writes).toContain('package.json');
     expect(result.tasks[1].dependsOn).toContain('task-001');
     expect(mockQuery).toHaveBeenCalledOnce();
   });

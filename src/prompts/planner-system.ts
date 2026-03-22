@@ -30,6 +30,15 @@ task-001 MUST always be the project scaffold. It:
 - writes[] MUST list EVERY file the scaffold creates — including .gitignore and any directory placeholder files
 - The worker MUST run "npm install" (or equivalent) after creating package.json
 - Do NOT list directories in writes[] — only list actual files (e.g., "src/index.ts" not "src/")
+- CRITICAL: task-001 writes ONLY config files (package.json, tsconfig.json, .gitignore, .env.example, vitest.config.ts). It must NEVER write source files that import other source files (e.g., src/index.ts, src/app.ts). Source files go in later tasks.
+
+ENTRY POINT RULE — MANDATORY:
+The entry point file (index.ts / main.ts / server.ts) that calls .listen() or bootstraps the app MUST be in the LAST wave (or second-to-last, before tests). It imports from app.ts which imports from everything else — so it depends on ALL other source tasks. Put it in the same task as app.ts, or in its own task that depends on the app task.
+
+DEPENDENCY ORDERING — CRITICAL:
+Tasks MUST be ordered by import chain. If file A imports from file B, the task writing A MUST depend on the task writing B.
+Correct order: types/schemas → services/stores → middleware → routes → app → index → tests
+NEVER put index.ts or app.ts in an early wave — they import from everything and must come last.
 
 INTERFACE CONTRACTS — MANDATORY:
 Every task MUST declare an "exports" array. Each export entry has:

@@ -173,7 +173,73 @@ Rules:
     return _generateWithRetry(config, spec, feedback, retriesRemaining - 1, systemPrompt);
   }
 
+  // Auto-fix: ensure dependency chains are complete
+  // If task A reads a file written by task B, A must depend on B
+  _autoFixDependencies(plan);
+
   return plan;
+}
+
+/**
+ * Auto-fix dependency chains: if task A reads a file written by task B,
+ * ensure A lists B in dependsOn. This catches cases where the LLM planner
+ * generates correct reads/writes but forgets to add all dependsOn entries.
+ * Also ensures task-001 (scaffold) doesn't write source files by moving
+ * any src/*.ts files to the first non-scaffold task.
+ */
+function _autoFixDependencies(plan: Plan): void {
+  // Build writes → taskId map
+  const writesMap = new Map<string, string>();
+  for (const task of plan.tasks) {
+    for (const file of task.writes) {
+      writesMap.set(file, task.id);
+    }
+  }
+
+  // Fix: ensure reads-based dependencies are in dependsOn
+  for (const task of plan.tasks) {
+    const depsSet = new Set(task.dependsOn);
+    for (const readFile of task.reads) {
+      const writer = writesMap.get(readFile);
+      if (writer && writer !== task.id && !depsSet.has(writer)) {
+        task.dependsOn.push(writer);
+        depsSet.add(writer);
+      }
+    }
+  }
+
+  // Fix: if scaffold (task-001) writes source files, move them to a new first task
+  // or the earliest task that doesn't have conflicting writes
+  const scaffold = plan.tasks.find(t => t.id === 'task-001');
+  if (scaffold) {
+    const sourceFiles = scaffold.writes.filter(f => {
+      const isSource = /\.(ts|tsx|js|jsx)$/.test(f) && !/\.config\.(ts|js)$/.test(f);
+      const isInSrc = f.startsWith('src/') || f.startsWith('lib/') || f.startsWith('app/');
+      return isSource && isInSrc;
+    });
+
+    if (sourceFiles.length > 0) {
+      // Remove source files from scaffold
+      scaffold.writes = scaffold.writes.filter(f => !sourceFiles.includes(f));
+
+      // Find the last task (before tests) and add these files to it
+      // or create a new task if needed
+      const nonTestTasks = plan.tasks.filter(t =>
+        t.id !== 'task-001' &&
+        !t.writes.some(f => f.includes('.test.') || f.includes('.spec.'))
+      );
+      const lastSourceTask = nonTestTasks[nonTestTasks.length - 1];
+
+      if (lastSourceTask) {
+        // Add source files to the last source task
+        for (const f of sourceFiles) {
+          if (!lastSourceTask.writes.includes(f)) {
+            lastSourceTask.writes.push(f);
+          }
+        }
+      }
+    }
+  }
 }
 
 /**

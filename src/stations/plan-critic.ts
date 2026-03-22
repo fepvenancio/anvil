@@ -171,6 +171,22 @@ export function validatePlanStructure(plan: Plan): string[] {
     }
   }
 
+  // Check: scaffold task (task-001) should not write source files that import other source files
+  const scaffoldTask = plan.tasks.find(t => t.id === 'task-001');
+  if (scaffoldTask) {
+    const sourceInScaffold = scaffoldTask.writes.filter(f => {
+      const isSource = /\.(ts|tsx|js|jsx)$/.test(f) && !/\.config\.(ts|js)$/.test(f) && !f.includes('.d.ts');
+      const isInSrc = f.startsWith('src/') || f.startsWith('lib/') || f.startsWith('app/');
+      return isSource && isInSrc;
+    });
+    if (sourceInScaffold.length > 0) {
+      issues.push(
+        `Scaffold task-001 writes source files [${sourceInScaffold.join(', ')}] that likely import from other tasks. ` +
+        `Move these to later tasks. Scaffold should only write config files (package.json, tsconfig.json, .gitignore, etc.)`
+      );
+    }
+  }
+
   // Check for circular dependencies (simple DFS)
   const visited = new Set<string>();
   const inStack = new Set<string>();
