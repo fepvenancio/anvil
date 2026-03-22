@@ -19,4 +19,4 @@ export { promptPlanReview, editPlanInEditor, displayPlanSummary } from './ui/pla
 export { executeSequentially, type ExecutionResult } from './orchestrator/sequential-runner.js';
 export { generatePlan } from './stations/planner.js';
 export { PLANNER_SYSTEM_PROMPT } from './prompts/planner-system.js';
-export { WORKER_SYSTEM_PROMPT, WORKER_TOOLS } from './prompts/worker-system.js';
+export { WORKER_SYSTEM_PROMPT } from './prompts/worker-system.js';

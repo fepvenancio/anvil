@@ -1,11 +1,7 @@
 import { simpleGit, type SimpleGit } from 'simple-git';
 import { join } from 'node:path';
-import { rm, writeFile, access, stat } from 'node:fs/promises';
+import { rm, writeFile, access } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-
-const execFileAsync = promisify(execFile);
 
 export class WorktreeManager {
   private git: SimpleGit;
@@ -33,17 +29,10 @@ export class WorktreeManager {
       await writeFile(gitignorePath, 'node_modules/\ndist/\n.anvil/\n*.log\n');
     }
 
-    // Install dependencies if package.json exists — ensures workers can run tsc/vitest
-    // in their self-verification step without relying on the prompt to tell them.
-    try {
-      await stat(join(worktreePath, 'package.json'));
-      await execFileAsync('npm', ['install', '--ignore-scripts'], {
-        cwd: worktreePath,
-        timeout: 120_000,
-      });
-    } catch {
-      // No package.json or install failed — worker will handle it
-    }
+    // NOTE: No npm install here. Scaffold pre-flight runs npm install on main after
+    // Wave 1 merge. Worktrees branch from main and inherit node_modules via the
+    // working directory. The tsc-judge also runs npm install before checking.
+    // Running it per-worktree was redundant (20+ installs per build).
 
     this.activeWorktrees.set(taskId, { worktreePath, branch });
     return { worktreePath, branch };
@@ -194,14 +183,37 @@ async function stageFiles(git: SimpleGit, writes: string[]): Promise<void> {
 // Files commonly generated as side effects (npm install, build tools, etc.)
 // These are NOT intentional writes and should be ignored by touch-map validation.
 const IGNORED_PATTERNS = [
+  // Package managers
   'package-lock.json',
   'node_modules/',
-  '.gitignore',
   'yarn.lock',
   'pnpm-lock.yaml',
   'bun.lockb',
-  'tsconfig.tsbuildinfo',
+  // Git / OS
+  '.gitignore',
   '.DS_Store',
+  // Build artifacts
+  'tsconfig.tsbuildinfo',
+  'dist/',
+  // Linters / formatters (workers may create these)
+  '.eslintrc.json',
+  '.eslintrc.js',
+  '.eslintrc.cjs',
+  '.eslintignore',
+  '.prettierrc',
+  '.prettierrc.json',
+  '.prettierignore',
+  // Environment
+  '.env',
+  '.env.local',
+  '.env.test',
+  '.env.example',
+  // Editor / IDE
+  '.vscode/',
+  '.idea/',
+  // Other common config
+  '.editorconfig',
+  '.npmrc',
 ];
 
 function isIgnoredFile(file: string): boolean {

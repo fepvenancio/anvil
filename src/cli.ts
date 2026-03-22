@@ -66,20 +66,17 @@ program
     progress.printPlanningBanner();
     const plan = await generatePlan(finalSpec, config, { stack, projectDir: process.cwd() });
 
-    // Plan critic: LLM + deterministic validation
-    const { critiquePlan } = await import('./stations/plan-critic.js');
+    // Plan validation (deterministic only — LLM critic removed per self-audit,
+    // planner already validates + auto-fixes, LLM critic was redundant and added 1-2min)
+    const { validatePlanStructure } = await import('./stations/plan-critic.js');
     progress.printValidatingBanner();
-    const criticResult = await critiquePlan(plan, config);
-    if (!criticResult.approved) {
-      console.log(chalk.yellow(`Plan critic found ${criticResult.issues.length} issue(s):`));
-      for (const issue of criticResult.issues) {
+    const structuralIssues = validatePlanStructure(plan);
+    if (structuralIssues.length > 0) {
+      console.log(chalk.yellow(`Plan has ${structuralIssues.length} structural issue(s):`));
+      for (const issue of structuralIssues) {
         console.log(chalk.yellow(`  - ${issue}`));
       }
-      console.log(chalk.blue('Re-planning with feedback...'));
-      // The structural issues are already fed back inside generatePlan via the retry loop
-      // If we get here, it means the plan passed the retry loop but the LLM critic disagrees
-      // Since we trust deterministic checks over LLM, just warn and continue
-      console.log(chalk.dim('  (Continuing — deterministic checks passed)'));
+      console.log(chalk.dim('  (Planner should have caught these — continuing with caution)'));
     }
 
     // Save plan to .anvil/roadmap.json

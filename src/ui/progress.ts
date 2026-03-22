@@ -28,11 +28,6 @@ export class ProgressDisplay {
     this.silent = options?.silent ?? false;
   }
 
-  /** Set total task count for progress tracking */
-  setTotalTasks(total: number): void {
-    this.totalTasks = total;
-  }
-
   /** Track cost as it accumulates */
   addCost(cost: number): void {
     this.runningCost += cost;
