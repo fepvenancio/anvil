@@ -22,11 +22,17 @@ SENIOR ARCHITECTURE REQUIREMENTS (scaffold task MUST set up):
 - package.json scripts: "dev": "tsx src/index.ts", "build": "tsc", "start": "node dist/index.js", "test": "vitest run", "typecheck": "tsc --noEmit"
 - .gitignore: node_modules/, dist/, .env, *.log
 - The project MUST follow this file structure:
-  src/types.ts or src/schemas.ts — Zod schemas + inferred types
-  src/service.ts or src/[name].ts — pure business logic (no HTTP objects)
-  src/app.ts — Express app setup + routes (export default app, NO .listen())
-  src/index.ts — entry point (import app, read PORT from env, call .listen())
-  tests/ or src/*.test.ts — comprehensive tests`,
+  src/config.ts — centralized configuration (ALL env vars with defaults + Zod validation):
+    export const config = { port: parseInt(process.env.PORT ?? '3000'), jwtSecret: process.env.JWT_SECRET ?? 'dev-secret', ... }
+    NEVER read process.env anywhere else — always import from config.ts
+  src/schemas.ts — Zod schemas + inferred types (source of truth for all data shapes)
+  src/service.ts or src/[name]Service.ts — pure business logic (no HTTP objects, no req/res)
+  src/middleware/ — auth, logging, error handler, validation middleware
+  src/routes/ — route handlers organized by domain (auth.ts, notes.ts, users.ts)
+  src/store.ts — data access layer (in-memory, database, etc.)
+  src/app.ts — Express app assembly (import routes + middleware, export app, NO .listen())
+  src/index.ts — entry point (3-5 lines: import config, import app, call .listen())
+  tests/ — comprehensive tests (one file per route group)`,
 };
 
 const python: StackPreset = {

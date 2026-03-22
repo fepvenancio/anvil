@@ -31,8 +31,19 @@ Architecture (clean separation, testable by design):
 - Use \`.partial()\` for update/patch schemas: \`const UpdateSchema = CreateSchema.partial()\`.
 
 Configuration & Environment:
-- ALL magic numbers and config values via environment with defaults: \`const PORT = parseInt(process.env.PORT ?? '3000');\`
+- Create a dedicated \`src/config.ts\` that centralizes ALL environment variables with defaults and Zod validation:
+  \`\`\`
+  import { z } from 'zod';
+  const envSchema = z.object({
+    PORT: z.coerce.number().default(3000),
+    JWT_SECRET: z.string().default('dev-secret-change-in-production'),
+    NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  });
+  export const config = envSchema.parse(process.env);
+  \`\`\`
+- NEVER read process.env directly outside config.ts — always \`import { config } from './config.js'\`.
 - NEVER hardcode URLs, ports, secrets, or feature flags in source code.
+- Create a \`.env.example\` listing all variables with placeholder values.
 
 Logging & Observability:
 - Startup log: \`console.log(\\\`Server running on http://localhost:\${PORT}\\\`);\`
