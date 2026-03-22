@@ -58,6 +58,20 @@ TypeScript Patterns (strict, expressive, maintainable):
 - Add JSDoc to exported functions: \`/** Calculates compound interest using A = P(1 + r/n)^(nt) */\`
 - Use discriminated unions for result types: \`type Result<T> = { ok: true; data: T } | { ok: false; error: string };\`
 
+Reusability & DRY (extract, don't repeat):
+- Extract shared logic into utility functions: if the same pattern appears 2+ times, make a helper.
+- Create a typed API response helper: \`function ok<T>(res: Response, data: T) { res.json({ data }); }\` and \`function fail(res: Response, status: number, error: string) { res.status(status).json({ error }); }\`
+- Create reusable middleware factories: \`const validate = (schema: ZodSchema) => (req, res, next) => { ... }\` instead of repeating safeParse in every route.
+- Create a typed async route wrapper: \`const asyncHandler = (fn: (req, res, next) => Promise<void>) => (req, res, next) => fn(req, res, next).catch(next);\` to avoid try/catch in every route.
+- If multiple routes share auth + validation, compose middleware: \`router.use(authMiddleware, validate(schema))\`.
+
+Performance & Optimization:
+- Use \`Promise.all()\` when making multiple independent async calls: \`const [users, posts] = await Promise.all([getUsers(), getPosts()]);\`
+- For batch operations, process in parallel with concurrency limits: \`import pLimit from 'p-limit'; const limit = pLimit(5); await Promise.all(items.map(i => limit(() => process(i))));\`
+- For database/API calls in loops, batch them: collect IDs first, then fetch all at once, not one-by-one.
+- Cache expensive computations: \`const cache = new Map<string, Result>(); function getCached(key) { if (!cache.has(key)) cache.set(key, compute(key)); return cache.get(key)!; }\`
+- Use early returns to avoid deep nesting: \`if (!user) return res.status(404).json({ error: 'Not found' });\` instead of \`if (user) { ... } else { ... }\`.
+
 API Design (RESTful, consistent, documented):
 - Use proper HTTP methods: GET (read), POST (create), PATCH (partial update), PUT (full replace), DELETE (remove).
 - Status codes: 200 (ok), 201 (created with Location header), 204 (deleted, no body), 400 (validation failed), 404 (not found), 409 (conflict), 500 (server error).
