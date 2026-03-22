@@ -244,8 +244,9 @@ function _autoFixDependencies(plan: Plan): void {
 }
 
 /**
- * Detect if the project directory already has source files (brownfield).
- * Returns file tree + export signatures for key files, or null for greenfield.
+ * GSD-inspired project scanner: gives the planner structured understanding of
+ * the project before it generates a plan. For greenfield projects, returns null.
+ * For brownfield, returns file tree + stack detection + architecture map + export signatures.
  */
 async function _detectProjectContext(
   projectDir: string,
@@ -261,8 +262,7 @@ async function _detectProjectContext(
     return null;
   }
 
-  // Filter to source files only (ignore node_modules, .anvil, etc.)
-  const sourceExts = new Set(['.ts', '.tsx', '.js', '.jsx', '.py', '.go', '.rs']);
+  const sourceExts = new Set(['.ts', '.tsx', '.js', '.jsx', '.py', '.go', '.rs', '.vue', '.svelte']);
   const sourceFiles = files.filter(f => {
     const ext = f.slice(f.lastIndexOf('.'));
     return sourceExts.has(ext) && !f.includes('node_modules') && !f.startsWith('.anvil/');
@@ -271,30 +271,68 @@ async function _detectProjectContext(
   // If fewer than 2 source files, treat as greenfield
   if (sourceFiles.length < 2) return null;
 
-  const fileTree = files.slice(0, 100).map(f => `  ${f}`).join('\n');
+  // --- Stack Detection ---
+  let stackInfo = '';
+  try {
+    const pkg = JSON.parse(await readFile(join(projectDir, 'package.json'), 'utf-8'));
+    const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
+    const detected: string[] = [];
+    if (allDeps.express || allDeps.hono || allDeps.fastify) detected.push(`HTTP: ${allDeps.express ? 'Express' : allDeps.hono ? 'Hono' : 'Fastify'}`);
+    if (allDeps.react || allDeps.next) detected.push(`Frontend: ${allDeps.next ? 'Next.js' : 'React'}`);
+    if (allDeps.vue) detected.push('Frontend: Vue');
+    if (allDeps.zod) detected.push('Validation: Zod');
+    if (allDeps.prisma || allDeps['@prisma/client']) detected.push('ORM: Prisma');
+    if (allDeps.vitest) detected.push('Testing: Vitest');
+    if (allDeps.jest) detected.push('Testing: Jest');
+    if (allDeps.typescript) detected.push('Language: TypeScript');
+    if (detected.length > 0) stackInfo = `\n### Detected Stack\n${detected.map(d => `- ${d}`).join('\n')}`;
+  } catch { /* no package.json */ }
 
-  // Extract export signatures from key TS/JS files (up to 10 files, first 5 exports each)
+  // --- Architecture Map (directories + file counts) ---
+  const dirCounts = new Map<string, number>();
+  for (const f of sourceFiles) {
+    const dir = f.includes('/') ? f.split('/').slice(0, -1).join('/') : '.';
+    dirCounts.set(dir, (dirCounts.get(dir) ?? 0) + 1);
+  }
+  const archMap = [...dirCounts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 15)
+    .map(([dir, count]) => `  ${dir}/ (${count} files)`)
+    .join('\n');
+
+  // --- File Tree (capped at 80 files) ---
+  const fileTree = files.slice(0, 80).map(f => `  ${f}`).join('\n');
+
+  // --- Export Signatures (up to 15 files, 8 exports each) ---
   const signatureLines: string[] = [];
-  const keyFiles = sourceFiles.slice(0, 10);
+  const keyFiles = sourceFiles.slice(0, 15);
   for (const file of keyFiles) {
     try {
       const content = await readFile(join(projectDir, file), 'utf-8');
       const exports = content
         .split('\n')
         .filter(line => /^export\s/.test(line))
-        .slice(0, 5)
-        .map(line => line.trim().slice(0, 120));
+        .slice(0, 8)
+        .map(line => line.trim().slice(0, 150));
       if (exports.length > 0) {
         signatureLines.push(`#### ${file}`);
         signatureLines.push(...exports.map(e => `  ${e}`));
       }
-    } catch {
-      // Skip unreadable files
-    }
+
+      // Also extract import patterns to understand dependencies
+      const imports = content
+        .split('\n')
+        .filter(line => /^import\s/.test(line))
+        .slice(0, 5)
+        .map(line => line.trim().slice(0, 150));
+      if (imports.length > 0) {
+        signatureLines.push(`  Imports: ${imports.map(i => i.replace(/^import\s+.*from\s+['"](.*)['"].*/, '$1')).join(', ')}`);
+      }
+    } catch { /* skip */ }
   }
 
   return {
-    fileTree,
+    fileTree: `### File Tree\n${fileTree}${stackInfo}\n\n### Architecture\n${archMap}`,
     signatures: signatureLines.join('\n') || '(no exports found)',
   };
 }
