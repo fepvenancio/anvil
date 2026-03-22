@@ -91,7 +91,9 @@ export async function runSecurityCheck(projectDir: string): Promise<SubJudgeChec
 
   // Filter to source files only
   const sourceExts = new Set(['.ts', '.tsx', '.js', '.jsx', '.mts', '.mjs', '.html', '.sql']);
-  const sourceFiles = files.filter(f => sourceExts.has(extname(f)));
+  // Exclude test files — they legitimately contain hardcoded passwords, tokens, etc. as test data
+  const testFilePattern = /\.(test|spec)\.(ts|tsx|js|jsx)$|__tests__\//;
+  const sourceFiles = files.filter(f => sourceExts.has(extname(f)) && !testFilePattern.test(f));
 
   if (sourceFiles.length === 0) {
     return { name: 'security', passed: true, message: 'skipped: no source files' };
