@@ -12,7 +12,7 @@ const typescript: StackPreset = {
 - Node 22+ (use built-in crypto.randomUUID(), no external UUID lib)
 - Vitest for testing, supertest for API testing
 - Zod for runtime validation (schemas as source of truth)
-- tsconfig.json: strict: true, target: "ES2022", module: "node16", moduleResolution: "node16"
+- tsconfig.json: strict: true, target: "ES2022", module: "node16", moduleResolution: "node16". Use "include": ["src/**/*"] ONLY — do NOT add a "files" property (it overrides include and breaks tsc)
 - package.json: "type": "module"
 - devDependencies MUST include: typescript, vitest, @types/node, supertest, @types/supertest, @types/express (if using Express)
 - dependencies for APIs MUST include: express, zod, cors

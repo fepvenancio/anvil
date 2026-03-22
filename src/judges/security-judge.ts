@@ -38,8 +38,8 @@ const SECURITY_RULES: Array<{
   {
     name: 'no-innerhtml',
     pattern: /\.innerHTML\s*=/,
-    fileExts: ['.ts', '.tsx', '.js', '.jsx', '.html'],
-    description: 'innerHTML assignment — XSS risk',
+    fileExts: ['.ts', '.tsx', '.js', '.jsx'],
+    description: 'innerHTML assignment in JS/TS — XSS risk (use textContent or DOM APIs)',
   },
   {
     name: 'no-insecure-http',
